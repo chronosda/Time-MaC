@@ -99,7 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
     
     # hyperparameters
-    parser.add_argument('--vlm_type', type=str, default='CLIP', help='VLM model type, e.g. CLIP, BLIP2, etc.')
+    parser.add_argument('--vlm_type', type=str, default='CLIP', help='VLM model type, e.g. CLIP, BLIP2, MAE, etc.')
     parser.add_argument('--image_size', type=int, default=224, help='image size for time series to image')
     parser.add_argument('--memory_bank_size', type=int, default=20, help='memory bank size')
     parser.add_argument('--patch_memory_size', type=int, default=100, help='patch memory bank size')
@@ -108,6 +108,18 @@ if __name__ == '__main__':
     parser.add_argument('--norm_const', type=float, default=0.4)
     parser.add_argument('--three_channel_image', type=str2bool, default=True, help='use three channel image')
     parser.add_argument('--finetune_vlm', type=str2bool, default=False, help='finetune VLM model')
+
+    # MAE encoder specific parameters
+    parser.add_argument('--mae_arch', type=str, default='mae_base', help='MAE architecture: mae_base, mae_large, mae_huge')
+    parser.add_argument('--mae_finetune_type', type=str, default='ln', help='MAE finetune type: full, ln, bias, none, mlp, attn')
+    parser.add_argument('--mae_ckpt_dir', type=str, default='./ckpt/', help='MAE checkpoint directory')
+    parser.add_argument('--mae_load_ckpt', type=str2bool, default=True, help='load MAE pre-trained checkpoint')
+    parser.add_argument('--mae_decoder_enabled', type=str2bool, default=False, help='enable MAE decoder for reconstruction')
+    # Optimized MAE encoder parameters
+    parser.add_argument('--use_optimized_mae', type=str2bool, default=False, help='use optimized MAE encoder for time series')
+    parser.add_argument('--use_adaptive_norm', type=str2bool, default=True, help='use adaptive normalization for time series')
+    parser.add_argument('--use_global_features', type=str2bool, default=True, help='use global features + CLS token')
+    parser.add_argument('--feature_fusion', type=str2bool, default=True, help='enable feature fusion')
     parser.add_argument('--learnable_image', type=str2bool, default=True, help='learnable image')
     parser.add_argument('--save_images', type=str2bool, default=False, help='save images')
     parser.add_argument('--use_cross_attention', type=str2bool, default=True, help='use cross attention to fuse image and text embeddings in customVLM')
@@ -116,6 +128,10 @@ if __name__ == '__main__':
     parser.add_argument('--w_out_query', type=str2bool, default=False, help='without query part')
     parser.add_argument('--visualize_embeddings', type=str2bool, default=False, help='visualize embeddings')
     parser.add_argument('--use_mem_gate', type=str2bool, default=False, help='use memory gate')
+
+    # Reconstruction-oriented MAE parameters
+    parser.add_argument('--use_reconstruction_mae', type=str2bool, default=False, help='use reconstruction-oriented MAE encoder')
+    parser.add_argument('--use_dual_path_reconstruction', type=str2bool, default=False, help='use dual-path reconstruction architecture')
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')

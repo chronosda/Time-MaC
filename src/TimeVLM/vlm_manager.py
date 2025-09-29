@@ -7,6 +7,10 @@ from transformers import Blip2Processor, Blip2Model
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
 from src.TimeVLM.vlm_custom import CustomVLM
+from src.TimeVLM.mae_encoder_plugin import MAEEncoderPlugin
+from src.TimeVLM.mae_encoder_optimized import MAEEncoderOptimized
+from src.TimeVLM.mae_reconstruction_vlm import MAEReconstructionVLM
+from src.TimeVLM.dual_path_reconstruction import DualPathReconstructionVLM
 from layers.models_mae import *
 from transformers.models.vilt import *
 
@@ -37,8 +41,10 @@ class VLMManager:
             self._init_vilt()
         elif self.vlm_type == "custom":
             self._init_custom()
+        elif self.vlm_type == "mae":
+            self._init_mae()
         else:
-            raise ValueError(f"Unsupported vlm_type: {self.vlm_type}. Choose from ['clip', 'blip2', 'vilt'].")
+            raise ValueError(f"Unsupported vlm_type: {self.vlm_type}. Choose from ['clip', 'blip2', 'vilt', 'custom', 'mae'].")
         self.model.to(self.device)
         learnable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print("VLM Learnable model parameters: {:,}".format(learnable_params))
@@ -120,6 +126,42 @@ class VLMManager:
         self.hidden_size = self.model.hidden_size
         self.max_input_text_length = 512  # Adjust based on text encoder
 
+    def _init_mae(self):
+        """
+        Initialize the MAE encoder plugin with reconstruction capabilities.
+        """
+        # Check for reconstruction-oriented MAE variants
+        use_reconstruction = getattr(self.config, 'use_reconstruction_mae', False)
+        use_dual_path = getattr(self.config, 'use_dual_path_reconstruction', False)
+        use_optimized = getattr(self.config, 'use_optimized_mae', False)
+
+        if use_dual_path:
+            print("Using dual-path reconstruction MAE encoder...")
+            self.model = DualPathReconstructionVLM(self.config)
+        elif use_reconstruction:
+            print("Using reconstruction-oriented MAE encoder...")
+            self.model = MAEReconstructionVLM(self.config)
+        elif use_optimized:
+            print("Using optimized MAE encoder for time series data...")
+            self.model = MAEEncoderOptimized(self.config)
+        else:
+            print("Using standard MAE encoder...")
+            self.model = MAEEncoderPlugin(self.config)
+
+        self.hidden_size = self.model.hidden_size
+        self.fusion_dim = self.model.fusion_dim
+        self.max_input_text_length = self.model.max_input_text_length
+        self.fused_feature_len = self.model.fused_feature_len
+
+        # MAE doesn't have multimodal fusion gate like CLIP/BLIP2
+        # But we can add a simple one for compatibility
+        self.multimodal_fusion_gate = nn.Sequential(
+            nn.Linear(2 * self.hidden_size, self.hidden_size),
+            nn.ReLU(),
+            nn.Linear(self.hidden_size, 1),
+            nn.Sigmoid()
+        ).to(self.device)
+
     def _set_requires_grad(self, model, value):
         for param in model.parameters():
             param.requires_grad = value
@@ -127,7 +169,7 @@ class VLMManager:
             self._set_requires_grad(child, value)
 
     def process_inputs(self, B, images, prompts):
-        try: 
+        try:
             if self.vlm_type == "clip":
                 return self._process_clip_inputs(B, images, prompts)
             elif self.vlm_type == "blip2":
@@ -136,6 +178,8 @@ class VLMManager:
                 return self._process_vilt_inputs(B, images, prompts)
             elif self.vlm_type == "custom":
                 return self._process_custom_inputs(B, images, prompts)
+            elif self.vlm_type == "mae":
+                return self._process_mae_inputs(B, images, prompts)
         except Exception as e:
             print(f"Error processing inputs: {e}")
             print(f"Images shape: {images.shape}")
@@ -183,4 +227,12 @@ class VLMManager:
     def _process_custom_inputs(self, B, images, prompts):
         vision_embeddings = self.model.get_vision_embeddings(images)    # Shape: [B, hidden_size]
         text_embeddings = self.model.get_text_embeddings(prompts)        # Shape: [B, hidden_size]
+        return vision_embeddings, text_embeddings  # Both shape: [B, hidden_size]
+
+    def _process_mae_inputs(self, B, images, prompts):
+        """
+        Process inputs for MAE encoder plugin.
+        """
+        # Use the MAE plugin's forward method
+        vision_embeddings, text_embeddings = self.model(images, prompts)
         return vision_embeddings, text_embeddings  # Both shape: [B, hidden_size]
