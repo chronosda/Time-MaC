@@ -1,0 +1,14 @@
+Zero‑shot 结果汇总（清空，等待严格重跑）
+============================================
+
+说明：为确保严格零样本范式（源域训练、目标域仅评测），已清空旧有零样本指标与结论。
+
+请使用以下脚本重跑并自动生成新日志与指标：
+- ETTh1 → ETTh2：`scripts/zero_shot_ETTh1_to_ETTh2_strict.sh`
+- ETTm1 → ETTm2：`scripts/zero_shot_ETTm1_to_ETTm2_strict.sh`
+
+生成内容：
+- 日志与汇总：`logs/strict_zero_shot_*/results.txt`
+- 指标与预测：`results/<setting>/{metrics.npy,pred.npy,true.npy}`
+
+生成时间：待实验完成后更新
