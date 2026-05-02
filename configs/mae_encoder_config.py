@@ -1,5 +1,5 @@
 """
-Configuration example for MAE encoder plugin in TimeVLM.
+Configuration example for the MAE encoder plugin used by Time-MaC.
 This config demonstrates how to use MAE encoder as a replacement for VLM encoders.
 """
 
@@ -25,7 +25,7 @@ class MAEEncoderConfig:
     use_gpu = True
     gpu = 0
 
-    # TimeVLM integration settings
+    # VLM-compatible integration settings
     task_name = "long_term_forecast"
     seq_len = 96
     pred_len = 96

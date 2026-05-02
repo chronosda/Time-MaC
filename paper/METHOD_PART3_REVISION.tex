@@ -1,0 +1,32 @@
+\subsection{Conformal Prediction}
+
+To provide uncertainty-aware prediction intervals for sequential forecasting, we introduce an optional post-hoc conformal calibration module after model training. The module does not modify the forecasting backbone. Instead, it calibrates the final point forecasts on a separate calibration split and then adapts the interval width online along the chronological test stream. Let $\hat{\mathbf{Y}}$ and $\mathbf{Y}$ denote the prediction and target tensors on the calibration split, and define the residual tensor $\mathbf{R}=|\mathbf{Y}-\hat{\mathbf{Y}}|$. To account for heteroscedastic uncertainty, we estimate a scale tensor $\mathbf{S}$ from the calibration residuals and define the normalized nonconformity score as
+\begin{equation}
+\mathbf{Q} = \mathbf{R} \oslash \mathbf{S},
+\end{equation}
+where $\oslash$ denotes element-wise division.
+
+To better match sequential dependence, the module reorganizes $\mathbf{Q}$ along the forecast-horizon axis and maintains a recent score buffer $\mathcal{B}^{(h)}$ for each horizon $h$. The initial threshold is obtained from the calibration split by
+\begin{equation}
+\lambda_h^{(0)} = \operatorname{Quantile}_{1-\alpha}\!\left(\mathcal{B}^{(h)}\right),
+\end{equation}
+where $\alpha$ is the target miscoverage level.
+
+During testing, the plugin follows a strict \textit{predict $\rightarrow$ observe $\rightarrow$ update} order and performs updates on chronological blocks to reduce the effect of highly overlapping windows. After each block is observed, we compute a horizon-wise batch miscoverage vector $\mathbf{e}^{(t)}$ and update the adaptive target via
+\begin{equation}
+\boldsymbol{\alpha}^{(t+1)} =
+\operatorname{clip}\!\left(
+\boldsymbol{\alpha}^{(t)} + \eta \left(\alpha \mathbf{1} - \mathbf{e}^{(t)}\right),
+\alpha_{\min}, \alpha_{\max}
+\right),
+\end{equation}
+where $\eta$ is the online update rate. The newly observed scores are appended to the recent buffer, and the next threshold is recomputed horizon-wise by a local risk solver based on CRC, HPD, or RCPS over the updated buffer. The final prediction interval is
+\begin{equation}
+[\hat{\mathbf{Y}}^{\text{lower}}, \hat{\mathbf{Y}}^{\text{upper}}]
+=
+\left[
+\hat{\mathbf{Y}} - \boldsymbol{\lambda}\odot\mathbf{S},\;
+\hat{\mathbf{Y}} + \boldsymbol{\lambda}\odot\mathbf{S}
+\right].
+\end{equation}
+This ACI-inspired online mechanism combines chronological buffering, block-wise updates, and Bayesian-quadrature-style threshold selection while remaining fully post-hoc.

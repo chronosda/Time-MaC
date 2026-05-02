@@ -1,8 +1,10 @@
-from sqlite3 import Time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch_wavelets import DWTForward
+try:
+    from pytorch_wavelets import DWTForward  # optional
+except Exception:
+    DWTForward = None
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -107,8 +109,8 @@ class LearnableTimeSeriesToImage(nn.Module):
 
         # 2D Convolution processing
         x_enc = x_enc.permute(0, 2, 1, 3)  # [B, hidden_dim, D, L]
-        x_enc = F.tanh(self.conv2d_1(x_enc))
-        x_enc = F.tanh(self.conv2d_2(x_enc))
+        x_enc = torch.tanh(self.conv2d_1(x_enc))
+        x_enc = torch.tanh(self.conv2d_2(x_enc))
         
         # Resize to target image size
         x_enc = F.interpolate(x_enc, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)

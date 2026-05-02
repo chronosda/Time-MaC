@@ -29,7 +29,7 @@ if __name__ == '__main__':
     torch.manual_seed(fix_seed)
     np.random.seed(fix_seed)
 
-    parser = argparse.ArgumentParser(description='TimeVLM')
+    parser = argparse.ArgumentParser(description='Time-MaC forecasting experiments')
 
     # basic config
     parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast', help='task name, options:[long_term_forecast, short_term_forecast, imputation, classification, anomaly_detection, zero_shot_forecast, few_shot_forecast]')

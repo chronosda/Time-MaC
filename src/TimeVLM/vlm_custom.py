@@ -5,8 +5,6 @@ import torch.nn as nn
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
 from layers.Cross_Attention import CrossAttention
-from layers.models_mae import *
-from transformers.models.vilt import *
 
 class CustomVLM(nn.Module):
     """
@@ -16,6 +14,7 @@ class CustomVLM(nn.Module):
         super(CustomVLM, self).__init__()
         self.config = config
         self.device = self._acquire_device()
+        self.offline = getattr(self.config, 'offline', False)
         
         # Initialize hidden_size
         self.hidden_size = 768  # Example hidden size, can be adjusted
@@ -36,21 +35,35 @@ class CustomVLM(nn.Module):
         """
         Initialize the vision encoder (e.g., ViT or ResNet).
         """
-        from transformers import ViTModel, ViTFeatureExtractor
-        self.vision_processor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch16-224')
-        self.vision_encoder = ViTModel.from_pretrained('google/vit-base-patch16-224')
-        self.vision_encoder.to(self.device)
-        self._set_requires_grad(self.vision_encoder, self.config.finetune_vlm)
+        try:
+            if self.offline:
+                raise RuntimeError("Offline mode")
+            from transformers import ViTModel, ViTFeatureExtractor
+            self.vision_processor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch16-224', local_files_only=True)
+            self.vision_encoder = ViTModel.from_pretrained('google/vit-base-patch16-224', local_files_only=True)
+            self.vision_encoder.to(self.device)
+            self._set_requires_grad(self.vision_encoder, self.config.finetune_vlm)
+        except Exception as e:
+            print(f"Vision encoder unavailable ({e}); using dummy embeddings.")
+            self.vision_processor = None
+            self.vision_encoder = None
 
     def _init_text_encoder(self):
         """
         Initialize the text encoder (e.g., BERT or RoBERTa).
         """
-        from transformers import BertTokenizer, BertModel
-        self.text_processor = BertTokenizer.from_pretrained('bert-base-uncased')
-        self.text_encoder = BertModel.from_pretrained('bert-base-uncased')
-        self.text_encoder.to(self.device)
-        self._set_requires_grad(self.text_encoder, self.config.finetune_vlm)
+        try:
+            if self.offline:
+                raise RuntimeError("Offline mode")
+            from transformers import BertTokenizer, BertModel
+            self.text_processor = BertTokenizer.from_pretrained('bert-base-uncased', local_files_only=True)
+            self.text_encoder = BertModel.from_pretrained('bert-base-uncased', local_files_only=True)
+            self.text_encoder.to(self.device)
+            self._set_requires_grad(self.text_encoder, self.config.finetune_vlm)
+        except Exception as e:
+            print(f"Text encoder unavailable ({e}); using dummy embeddings.")
+            self.text_processor = None
+            self.text_encoder = None
 
     def _set_requires_grad(self, model, value):
         """
@@ -69,9 +82,12 @@ class CustomVLM(nn.Module):
         Returns:
             torch.Tensor: Vision embeddings of shape [B, hidden_size].
         """
+        if self.vision_encoder is None:
+            b = len(images) if isinstance(images, list) else (images.shape[0] if isinstance(images, torch.Tensor) else 1)
+            return torch.zeros(b, self.hidden_size, device=self.device)
         inputs = self.vision_processor(images=images, return_tensors="pt").to(self.device)
         outputs = self.vision_encoder(**inputs)
-        return outputs.last_hidden_state.mean(dim=1)  # Average pooling over patches
+        return outputs.last_hidden_state.mean(dim=1)
 
     def get_text_embeddings(self, texts):
         """
@@ -83,6 +99,9 @@ class CustomVLM(nn.Module):
         Returns:
             torch.Tensor: Text embeddings of shape [B, hidden_size].
         """
+        if self.text_encoder is None:
+            b = len(texts) if isinstance(texts, list) else 1
+            return torch.zeros(b, self.hidden_size, device=self.device)
         inputs = self.text_processor(texts, return_tensors="pt", padding=True, truncation=True).to(self.device)
         outputs = self.text_encoder(**inputs)
-        return outputs.last_hidden_state[:, 0, :]  # Use [CLS] token embedding
+        return outputs.last_hidden_state[:, 0, :]

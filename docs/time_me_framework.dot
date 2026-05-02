@@ -1,0 +1,78 @@
+digraph TimeME {
+  rankdir=LR;
+  node [shape=box, fontsize=10];
+
+  subgraph cluster_data {
+    label="Input & Preprocess";
+    color="#BBBBBB";
+    X [label="Multivariate TS\nB×L×D"];
+    Norm [label="Normalize\n(z-score)"];
+    X -> Norm;
+  }
+
+  subgraph cluster_temporal {
+    label="Temporal Encoding & Memory";
+    color="#8FB3E6";
+    Patch [label="Patch Embedding"];
+    LMem [label="Local Memory\n(MemoryBank + MLP + Attn)"];
+    GMem [label="Global Memory\n(MHA + Pool)"];
+    Comb [label="Combine (β)"];
+    Flat [label="Flatten"];
+    THead [label="temporal_head\n→ B×n_vars×d_model"];
+    MHead [label="memory_head\n→ B×n_vars×pred_len"];
+
+    Norm -> Patch -> LMem;
+    Patch -> GMem;
+    LMem -> Comb;
+    GMem -> Comb;
+    Comb -> Flat -> THead;
+    Flat -> MHead;
+  }
+
+  subgraph cluster_vlm {
+    label="Vision/Text Encoder (VLMManager)";
+    color="#F5B67A";
+    TSImg [label="TS→Image\n(Learnable)"];
+    VLM [label="MAE/CLIP/BLIP2/ViLT\n(offline fallback)"];
+    VEmb [label="Vision\nB×1×H"];
+    TEmb [label="Text\nB×H"];
+    TSImg -> VLM;
+    VLM -> VEmb;
+    VLM -> TEmb;
+  }
+
+  subgraph cluster_cm {
+    label="Coupled-Mamba Fusion";
+    color="#9FD6AE";
+    PreProj [label="Pre-Projection\n(vars→d_model)"];
+    MM [label="MultiMamba (3 branches)\nAudio/Visual/Text"];
+    XMod [label="Cross-Modal Enhance\n(ResNet branches)"];
+    WFuse [label="Weighted Fusion\n(softmax weights)"];
+    Reg [label="Regression Head\n→ B×n_vars×pred_len"];
+
+    THead -> PreProj -> MM -> XMod -> WFuse -> Reg;
+    VEmb -> MM;
+    TEmb -> MM;
+  }
+
+  Gate [label="Fusion Gate σ(g)\nMemory vs MultiModal"];
+  Denorm [label="De-Normalize"];
+  Y [label="Forecast\nB×pred_len×D"];
+
+  MHead -> Gate;
+  Reg -> Gate;
+  Gate -> Denorm -> Y;
+
+  subgraph cluster_conf {
+    label="Conformal Calibration (optional)";
+    color="#D3C9F3";
+    Resid [label="Calibration Residuals\n|y−ŷ|"];
+    Scale [label="Scale Estimation\n(MAD/STD/Global)"];
+    Fit [label="Fit Global λ\n(CRC/HPD/RCPS)"];
+    Interv [label="Intervals on Test\n[y±λ·s]"];
+
+    Y -> Resid -> Scale -> Fit -> Interv;
+  }
+
+  Norm -> TSImg [style=dashed, color="#999999"];
+}

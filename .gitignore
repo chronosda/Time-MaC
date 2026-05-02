@@ -1,9 +1,60 @@
-checkpoints
-dataset
-**/__pycache__/
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environments
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Jupyter and editor state
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.DS_Store
+
+# Local experiment outputs
+checkpoints/
+ckpt/
+dataset/
+logs/
 wandb/
-logs
-results
-test_results
-m4_results
+predictions/
+test_results/
+m4_results/
+ts_images/
+zero_shot_backup/
 result_long_term_forecast.txt
+
+# Heavy model/data artifacts
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.parquet
+
+# Generated reports that should be curated before publishing
+results/
+*.log
+*.out
+*.pid
+
+# LaTeX build products
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.synctex.gz

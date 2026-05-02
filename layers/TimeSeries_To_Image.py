@@ -1,7 +1,10 @@
 import einops
 import torch
 import torch.nn.functional as F
-from pytorch_wavelets import DWTForward
+try:
+    from pytorch_wavelets import DWTForward  # optional
+except Exception:
+    DWTForward = None
 
 def time_series_to_simple_image(x_enc, image_size, context_len, periodicity):
     """

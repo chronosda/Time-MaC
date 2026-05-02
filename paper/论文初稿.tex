@@ -1,0 +1,279 @@
+\documentclass[journal]{IEEEtran}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=black,
+    urlcolor=black
+}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\ifCLASSINFOpdf
+\else
+   \usepackage[dvips]{graphicx}
+\fi
+
+\usepackage{url}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{float}
+\usepackage{amssymb}
+\usepackage{amsmath} % for mathematical symbols and environments
+\usepackage{algorithm}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+\usepackage{afterpage}
+\usepackage{dblfloatfix}
+\usepackage{multirow}
+\usepackage{graphicx}
+\hyphenation{op-tical net-works semi-conduc-tor}
+\usepackage{caption}
+\captionsetup{
+  singlelinecheck=off,
+  justification=centering
+}
+
+\captionsetup[table]{labelsep=space}
+\newcommand{\best}[1]{\textcolor{red}{\textbf{#1}}}
+\newcommand{\second}[1]{\textcolor{blue}{\underline{#1}}}
+\begin{document}
+
+\title{Time-Mac: Multimodal Time Series Forecasting with Reconstruction-Oriented MAE and Coupled-Mamba Fusion}
+
+\author{Zhufeng Jiang, Hui Wang*, Guoliang Luo, Zizhu Fan and Lu Xu
+
+\thanks{The research is supported by the National Natural Science Foundation of China under Grant No. 61991401,62462032, Natural Science Foundation of Jiangxi, China under Grant Nos. 20224BAB212014, 20232ABC03A04,20223BBE51039,20232ACB212007, Open Project Program of the State Key Laboratory of CAD\&CG under Grant No. A2334. Corresponding Author: Hui Wang(e-mail: huiwangens@163.com).}
+\thanks{Zhufeng Jiang is with the School of Tianyou, East China Jiaotong University, Nanchang 330013, China.}
+\thanks{Hui Wang, Guoliang Luo and Lu Xu are with the School of Information and Software Engineering, East China Jiaotong University, Nanchang 330013, China.}
+\thanks{Zizhu Fan is with the College of Computer Science and Technology, Shanghai University of Electric Power, Shanghai 201306, China.}}
+
+\markboth{Journal of \LaTeX\ Class Files, Vol. 14, No. 8, August 2015}
+{Shell \MakeLowercase{\textit{et al.}}: Bare Demo of IEEEtran.cls for IEEE Journals}
+\maketitle
+
+\begin{abstract}
+Time-Mac is presented as a lightweight yet effective framework for multimodal time series forecasting that couples temporal memory with reconstruction-oriented visual representation through a Coupled-Mamba fusion module. The framework addresses practical integration issues in Time-VLM-style pipelines by (i) introducing a temporal memory branch for long-range signal preservation, (ii) converting multivariate time series into image-oriented inputs and extracting reconstruction-conditioned embeddings with a pretrained MAE backbone, and (iii) integrating temporal and visual cues through coupled state-space fusion. By using reconstruction-oriented visual features, Time-Mac emphasizes structural patterns such as periodic textures, spectral variations, and trend transitions that are often weakened in purely numerical forecasting pipelines. The coupled fusion design further preserves modality-specific dynamics before the final prediction. Furthermore, an optional post-hoc online calibration plugin is implemented to provide empirically calibrated, coverage-oriented prediction intervals under chronological evaluation. Experiments on seven standard long-term forecasting benchmarks show that Time-Mac achieves competitive overall forecasting performance and exhibits clear robustness advantages under severe missing-observation settings. The code is publicly available at: \url{https://github.com/chronosda/Time-Mac.git}.
+\end{abstract}
+
+\begin{IEEEkeywords}
+multivariate time series forecasting, multimodal learning, masked autoencoder, Mamba, coverage-oriented calibration
+\end{IEEEkeywords}
+
+
+\IEEEpeerreviewmaketitle
+
+
+
+\section{Introduction}
+
+\IEEEPARstart{L}{o}{n}g-term multivariate time-series forecasting is a fundamental problem in many real-world applications, including energy management, transportation systems, weather monitoring, and industrial analytics. Recent progress has been driven by decomposition-based and Transformer-based forecasters, such as N-BEATS and Autoformer \cite{oreshkin2020nbeats,wu2021autoformer}. Tokenized and multiscale forecasting formulations have further improved long-horizon prediction accuracy \cite{nie2023time,wang2024timemixer}. Subsequent studies also strengthened long-range modeling through pyramidal attention, non-stationary modeling, and 2D temporal variation \cite{liu2022pyraformer,liu2022nonstationary,wu2023timesnet}. More recently, inverted tokenization has provided another effective perspective on multivariate forecasting \cite{liu2024itransformer}. In parallel, state-space and foundation-model-based approaches have expanded the modeling scale and generalization capability of time-series forecasting \cite{gu2023mamba,liu2024timer,ansari2024chronos}. Recent large-scale frameworks, such as UniTS, Time-MoE, and semantic-enhanced LLM forecasting, further highlight the importance of scalable priors and cross-domain knowledge transfer \cite{gao2024units,shi2025timemoe,liu2026semantic}. Despite strong benchmark performance, robust forecasting under corrupted or incomplete observations remains a practical bottleneck, especially when the model must preserve long-range temporal structure while coping with heterogeneous variables and distribution shifts.
+
+Recently, language-augmented forecasting pipelines have attempted to transfer priors from pretrained language models into the time-series domain \cite{jin2024timellm,liu2024unitime}. More recent multimodal forecasting frameworks further explore how vision-language priors can be incorporated into temporal prediction \cite{zhong2025time,chen2026empowering}. Related foundation-model studies also suggest that cross-modal representations can benefit time-series modeling when external priors are introduced in a controlled manner \cite{liu2024timeffm,liang2024foundation}. However, time-series-derived images differ substantially from natural images: they primarily encode periodic textures, spectral structure, and trend transitions rather than semantic objects \cite{li2020forecasting,chen2024visionts}. This visual property is also consistent with recent studies that reinterpret temporal variation through image-like structures \cite{wu2023timesnet}. Consequently, directly applying standard discriminative visual encoders may overlook fine-grained reconstruction cues that are important for forecasting, whereas reconstruction-oriented pretraining is better aligned with this setting \cite{he2022mae,chen2024visionts}. Meanwhile, effective multimodal forecasting also requires dedicated cross-modal interaction rather than naive early fusion or feature concatenation, especially under noisy or incomplete inputs \cite{li2024coupled}.
+
+To address these issues, Time-Mac is proposed as a multimodal forecasting framework built upon the general Time-VLM-style pipeline, with a focus on improving its visual representation and multimodal fusion components. Specifically, Time-Mac combines a reconstruction-oriented MAE visual encoder and a Coupled-Mamba fusion module, with an optional post-hoc calibration plugin for interval estimation. The visual branch first converts multivariate time series into image-oriented representations and extracts reconstruction-conditioned embeddings via a pretrained MAE backbone. The fusion branch then preserves modality-specific dynamics through parallel state-space pathways while explicitly modeling cross-modal interactions. The optional calibration plugin further provides empirically calibrated, coverage-oriented prediction intervals without changing the trained forecasting backbone \cite{angelopoulos2023conformal}. Fig.~\ref{fig:motivation} summarizes the motivation under missing observations.
+
+\begin{figure}[!t]
+    \centering
+    \includegraphics[width=\linewidth]{动机图（终）.png}
+    \caption{Motivation of Time-Mac under missing observations: reconstruction-aware visual cues and coupled fusion improve robustness when temporal inputs are incomplete.}
+    \label{fig:motivation}
+\end{figure}
+
+Guided by this intuition, the complete architecture of Time-Mac is detailed in the next section. In summary, the contributions of this work are threefold: 1) a reconstruction-oriented visual encoding pipeline that extracts structurally informative cues from time-series pseudo-images; 2) a Coupled-Mamba fusion design that preserves modality-specific dynamics while enabling explicit cross-modal enhancement; and 3) an optional post-hoc online calibration plugin for empirically calibrated interval estimation under chronological forecasting, without modifying the trained forecasting backbone.
+
+
+
+\section{PROPOSED METHODOLOGY}
+This section details the architecture of Time-Mac. The temporal forecasting branch follows the Time-VLM-style backbone design, while the main methodological focus is placed on the reconstruction-oriented MAE visual pathway, the Coupled-Mamba multimodal fusion module, and the optional post-hoc coverage-oriented calibration plugin. The complete workflow is illustrated in Fig.~\ref{fig:time_me_framework}, followed by detailed descriptions of these components.
+
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=\textwidth]{框架图.png}
+    \caption{Workflow of Time-Mac. Time-series inputs are transformed into reconstruction-aware visual representations and processed together with temporal features through coupled state-space fusion. A learnable gate combines memory-based and multimodal predictions, and the optional calibration stage is applied after backbone training for interval estimation.}
+    \label{fig:time_me_framework}
+\end{figure*}
+
+\subsection{Reconstruction-Oriented MAE Visual Encoder}
+
+The visual branch is instantiated using a reconstruction-oriented Masked Autoencoder (MAE) \cite{he2022mae,chen2024visionts}. Unlike conventional discriminative backbones, MAE's reconstruction objective encourages the network to preserve fine-
+grained structures under partial observation, making it well suited for capturing periodic patterns and trend transitions in abstract time-series images.
+
+To leverage this property, the normalized time-series is first transformed into an image-oriented representation. Given a normalized multivariate time series $\mathbf{x} \in \mathbb{R}^{B \times T \times D}$, where $B$, $T$, and $D$ denote the batch size, look-back length, and number of variables, respectively, the normalized raw value $x_{b,t,d}$ is augmented with its spectral magnitude and periodic priors to form a temporal feature vector $\mathbf{F}_{b,t,d}$:
+\begin{equation}
+\mathbf{F}_{b,t,d} = \left[ x_{b,t,d}, \left|\mathcal{F}(\mathbf{x}_{b,:,d})\right|_{t}, \sin\left(\frac{2\pi t}{P}\right), \cos\left(\frac{2\pi t}{P}\right) \right] \in \mathbb{R}^{4}
+\end{equation}
+where $\mathcal{F}(\cdot)$ is the Fourier transform, $\left|\mathcal{F}(\mathbf{x}_{b,:,d})\right|_{t}$ denotes the spectral magnitude aligned to the $t$-th temporal position, and $P$ is the base period. These features are then mapped to a unified visual tensor $\mathbf{I} \in \mathbb{R}^{B \times C \times H \times W}$ via learnable 1D and 2D projections:
+\begin{equation}
+\mathbf{I} = \operatorname{Resize}\left( \phi_{\text{2D}}\left( \operatorname{Reshape}(\phi_{\text{1D}}(\mathbf{F}))\right) \right)
+\in \mathbb{R}^{B \times C \times H \times W}
+\end{equation}
+
+Instead of relying solely on a standard encoder summary representation(e.g., a CLS token), \textit{reconstruction-conditioned} features are constructed to align better with the original temporal structural characteristics. The pretrained MAE processes the masked image $\mathbf{I}$ with masking ratio $\rho$ to yield latent representations $\mathbf{L}$, which are then decoded to reconstruct the missing content $\hat{\mathbf{I}} = \text{MAE}_{\text{dec}}(\mathbf{L}, \pi_{\mathrm{restore}})$, where $\pi_{\mathrm{restore}}$ denotes the restoration indices used by the decoder to recover the original patch order.
+
+Finally, the reconstructed regions, indicated by the image-space mask $\mathbf{M}_{\text{img}}$, are aggregated via Global Average Pooling (GAP) and projected via $\psi(\cdot)$ to obtain the visual embedding $\mathbf{z}_v$:
+\begin{equation}
+\mathbf{z}_v = \psi\left(\operatorname{GAP}\left(\hat{\mathbf{I}} \odot \mathbf{M}_{\text{img}}\right)\right) \in \mathbb{R}^{B \times d_v}
+\end{equation}
+
+This visually aligned embedding $\mathbf{z}_v$ is forwarded to the multimodal fusion module. Note that during the downstream forecasting stage, the overall forecasting framework is optimized by the primary
+prediction loss, while no additional reconstruction objective is imposed for this visual branch.
+\subsection{Coupled-Mamba Fusion}
+
+The coupled-Mamba fusion module is the core component designed to integrate temporal, visual, and text-compatible representations \cite{li2024coupled,gu2023mamba}. Unlike standard early-fusion strategies, modality-specific dynamics are preserved during the main sequence modeling stage by utilizing parallel state-space backbones.
+
+Formally, given the temporal sequence $\mathbf{T} \in \mathbb{R}^{B \times n \times d_t}$, the visual embedding $\mathbf{V} \in \mathbb{R}^{B \times 1 \times d_v}$, and the text-branch representation $\mathbf{S} \in \mathbb{R}^{B \times 1 \times d_s}$, all modalities are first projected into a unified latent space $\mathbb{R}^{d}$ via modality-specific mappings $g_m(\cdot)$:
+\begin{equation}
+\mathbf{H}_t^{(0)} = g_t(\mathbf{T}), \quad \mathbf{H}_v^{(0)} = g_v(\mathbf{V}), \quad \mathbf{H}_s^{(0)} = g_s(\mathbf{S})
+\end{equation}
+where $\mathbf{H}_m^{(0)}$ denotes the aligned initial feature for branch $m \in \{t,v,s\}$.
+
+For each layer $l \in \{1,\dots,L\}$, the features are independently updated through a Mamba-based state-space block with a residual connection:
+\begin{equation}
+\tilde{\mathbf{H}}_m^{(l)} = \operatorname{Norm}\left(\operatorname{Mamba}_m^{(l)}\big(\mathbf{H}_m^{(l-1)}\big)\right) + \mathbf{H}_m^{(l-1)}
+\end{equation}
+
+To capture complementary information, a cross-modal enhancement step is introduced immediately after the Mamba block. Small residual MLPs $R_m(\cdot)$ inject context from the other branches. The temporal branch is enhanced by broadcasting the visual and text tokens, while the visual and text branches aggregate the temporal sequence via mean pooling:
+\begin{align}
+\mathbf{H}_t^{(l)} &= \tilde{\mathbf{H}}_t^{(l)} + R_t\big([\operatorname{Broadcast}_{n}(\tilde{\mathbf{H}}_v^{(l)}); \operatorname{Broadcast}_{n}(\tilde{\mathbf{H}}_s^{(l)})]\big) \\
+\mathbf{H}_v^{(l)} &= \tilde{\mathbf{H}}_v^{(l)} + R_v\big([\operatorname{MeanPool}_{n}(\tilde{\mathbf{H}}_t^{(l)}); \tilde{\mathbf{H}}_s^{(l)}]\big) \\
+\mathbf{H}_s^{(l)} &= \tilde{\mathbf{H}}_s^{(l)} + R_s\big([\operatorname{MeanPool}_{n}(\tilde{\mathbf{H}}_t^{(l)}); \tilde{\mathbf{H}}_v^{(l)}]\big)
+\end{align}
+where $[\cdot;\cdot]$ denotes feature concatenation. This step yields the final layer output $\mathbf{H}_m^{(l)}$ which serves as the input for the subsequent layer.
+
+At the final layer $L$, each branch is compressed via max pooling along the sequence dimension to obtain compact modality summaries $\mathbf{p}_m = \operatorname{MaxPool}(\mathbf{H}_m^{(L)}) \in \mathbb{R}^{B \times d}$. These summaries are fused using learnable scalar weights $\omega_m$ normalized by a softmax operator:
+\begin{equation}
+\mathbf{f} = \sum_{m \in \{t,v,s\}} \omega_m \mathbf{p}_m, \qquad (\omega_t,\omega_v,\omega_s) = \operatorname{Softmax}([w_t, w_v, w_s])
+\end{equation}
+Finally, the multimodal prediction $\mathbf{Y}_{\mathrm{mm}} = h_{\mathrm{reg}}(\mathbf{f})$ is generated by the regression head. During the downstream forecasting stage, $\mathbf{Y}_{\mathrm{mm}}$ is combined with the memory-branch prediction through a learnable sigmoid gate. This design preserves modality interactions while retaining the temporal dynamics captured by the memory branch.
+
+\subsection{Post-hoc Coverage-Oriented Calibration}
+
+To equip point forecasts with practical interval estimates in sequential forecasting, an optional post-hoc online calibration module is introduced \cite{angelopoulos2023conformal,gibbs2021aci,gibbs2024online}. Being fully decoupled from end-to-end optimization, this lightweight plugin produces empirically calibrated, coverage-oriented prediction intervals without altering the preceding MAE and Mamba backbones. Let $\hat{\mathbf{Y}}$ and $\mathbf{Y}$ denote the prediction and target tensors on a hold-out calibration set, and let $\mathbf{R}=|\mathbf{Y}-\hat{\mathbf{Y}}|$ be the residual tensor. To account for heteroscedastic uncertainty, a scale tensor $\mathbf{S}$ is estimated from calibration residuals and the normalized nonconformity score is defined as
+\begin{equation}
+\mathbf{Q} = \mathbf{R} \oslash \mathbf{S},
+\end{equation}
+where $\oslash$ denotes element-wise division. Instead of fitting a single global threshold, the implemented plugin adopts an \textit{ACI-inspired} horizon-wise online rule. For each forecast horizon $h$, the calibration split initializes a recent score buffer $\mathcal{B}^{(h)}$ and the corresponding threshold
+\begin{equation}
+\lambda_h^{(0)} = \mathcal{G}\!\left(\mathcal{B}^{(h)}, \alpha\right),
+\end{equation}
+\noindent where $\mathcal{G}(\cdot)$ denotes a local threshold solver, implemented with either an empirical quantile rule or a CRC/HPD/RCPS-style bounded-risk criterion.
+During testing, the module follows a strict \textit{predict $\rightarrow$ observe $\rightarrow$ update} order and performs updates on chronological blocks to reduce the effect of highly overlapping windows. After each block is observed, the horizon-wise empirical miscoverage vector $\mathbf{e}^{(t)}$ is computed and the adaptive target is updated as
+\begin{equation}
+\boldsymbol{\alpha}^{(t+1)} =
+\operatorname{clip}\!\left(
+\boldsymbol{\alpha}^{(t)} + \eta \left(\alpha \mathbf{1} - \mathbf{e}^{(t)}\right),
+\alpha_{\min}, \alpha_{\max}
+\right),
+\end{equation}
+where $\eta$ is the update rate. The newly observed normalized scores are appended to the recent buffer, and the next threshold is recomputed horizon-wise by the same local threshold solver over the updated buffer. Finally, the resulting threshold vector $\boldsymbol{\lambda}$ is applied together with the calibrated scale tensor $\mathbf{S}$ to form prediction intervals:
+\begin{equation}
+[\hat{\mathbf{Y}}^{\mathrm{lower}}, \hat{\mathbf{Y}}^{\mathrm{upper}}]
+=
+\left[
+\hat{\mathbf{Y}} - \boldsymbol{\lambda}\odot\mathbf{S},\;
+\hat{\mathbf{Y}} + \boldsymbol{\lambda}\odot\mathbf{S}
+\right].
+\end{equation}
+By combining chronological buffering, block-wise updates, and Bayesian-quadrature-style threshold selection, this module offers adaptive interval estimates on top of the original multimodal point forecasts.
+
+\section{Experiments}
+
+\subsection{Implementation Details}
+
+\paragraph{Datasets and Setup}
+Time-Mac is evaluated on seven standard multivariate time-series forecasting benchmarks: Electricity, ETTh1, ETTh2, ETTm1, ETTm2, Weather, and Traffic. All datasets follow the public long-term forecasting benchmark protocols: ETT datasets use the standard chronological ETT split, while Electricity, Weather, and Traffic use the standard custom-dataset split adopted by common forecasting benchmarks. All variables are normalized using statistics computed strictly from the training split to avoid information leakage across chronological partitions. Unless otherwise specified, the input sequence length is fixed at 512, and the prediction horizon $T_{\text{out}}$ is selected from $\{96, 192, 336, 720\}$.
+
+\paragraph{Optimization and Training}
+The model is optimized using Adam with an initial learning rate of $1\times10^{-4}$, weight decay of $1\times10^{-5}$, MSE loss, gradient clipping with a maximum norm of 1.0, StepLR decay every 20 epochs, and early stopping with a patience of 15 epochs. The VLM/MAE branch is initialized from pretrained checkpoints and kept compatible with local execution during training. All experiments are conducted on a single NVIDIA Tesla V100 GPU.
+
+\paragraph{Configurations and Evaluation}
+For the primary ablation setting (Electricity, $T_{\text{out}}=96$), the latent dimension is set to 256, batch size to 6, and the maximum training limit to 20 epochs.
+
+\subsection{Main Forecasting Results}
+
+\begin{table}[htb]
+\renewcommand{\arraystretch}{1}
+\caption{Average MSE comparison of different forecasting methods across benchmark datasets, where the reported values are averaged over the prediction horizons of 96, 192, 336, and 720. Lower is better.}
+\label{tab:timevlm_summary}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{0.1pt}
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+Methods &
+\makebox[0.05\textwidth][c]{ETTh1} &
+\makebox[0.05\textwidth][c]{ETTh2} &
+\makebox[0.05\textwidth][c]{ETTm1} &
+\makebox[0.05\textwidth][c]{ETTm2} &
+\makebox[0.06\textwidth][c]{Weather} &
+\makebox[0.06\textwidth][c]{Electricity} &
+\makebox[0.06\textwidth][c]{Traffic} \\
+\midrule
+Time-LLM (3405M) &
+\second{0.408} & 0.334 & \best{0.329} & \second{0.251} & \best{0.225} & \best{0.158} & \best{0.388} \\
+GPT4TS &
+0.465 & 0.381 & 0.388 & 0.284 & 0.237 & 0.167 & 0.414 \\
+DLinear &
+0.422 & 0.431 & 0.357 & 0.267 & 0.248 & 0.166 & 0.433 \\
+PatchTST &
+0.413 & \second{0.330} & 0.351 & 0.255 & \best{0.225} & \second{0.161} & \second{0.390} \\
+FEDformer &
+0.440 & 0.437 & 0.448 & 0.305 & 0.309 & 0.214 & 0.610 \\
+Autoformer &
+0.496 & 0.450 & 0.588 & 0.327 & 0.338 & 0.227 & 0.628 \\
+Informer &
+1.040 & 4.431 & 0.961 & 1.410 & 0.634 & 0.311 & 0.764 \\
+Ours (30M) &
+\best{0.405} & \best{0.259} & \second{0.350} & \best{0.164} & \second{0.227} & 0.164 & 0.404 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:timevlm_summary} reports the average MSE comparison across benchmark datasets. Time-Mac achieves competitive performance and attains the best average MSE on several datasets, indicating that the overall framework is effective across diverse forecasting scenarios.
+
+
+\subsection{Robustness Under Missing Observations}
+
+To evaluate robustness against incomplete observations, the full model with Coupled-Mamba (CM) fusion is compared with a no-CM variant under random and block masking. Random masking simulates scattered sensor dropouts across variables and time steps, while block masking reflects contiguous missing segments caused by temporary sensor failures or communication interruptions in practical time-series collection.
+
+As shown in Table~\ref{tab:missing_ablation}, CM consistently improves performance as the missing ratio increases, and the margin becomes more visible under heavier corruption. At a mask ratio of 0.5, it reduces MSE by approximately 4.5\% under random masking and 2.7\% under block masking, showing that the fusion module remains useful when a large portion of the input context is corrupted.
+
+These results suggest that Coupled-Mamba is most beneficial in information-limited scenarios, where cross-view compensation helps recover useful predictive signals from degraded temporal inputs. The advantage is especially relevant for multimodal forecasting, because reconstruction-aware visual cues can provide complementary structure when raw temporal observations become unreliable and temporal memory alone becomes less sufficient.
+
+\begin{table}[htb]
+\renewcommand{\arraystretch}{1.1}
+\caption{Robustness evaluation under random and block masking scenarios in terms of Mean Absolute Error (MAE) and Mean Squared Error (MSE). Best results are highlighted in red.}
+\label{tab:missing_ablation}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\multirow{2}{*}{Mask Ratio} & \multicolumn{2}{c}{MSE $\downarrow$} & \multicolumn{2}{c}{MAE $\downarrow$} \\
+\cmidrule(lr){2-3} \cmidrule(l){4-5}
+ & no-CM & CM (Ours) & no-CM & CM (Ours) \\
+\midrule
+\multicolumn{5}{l}{\textit{Scenario A: Random Masking}} \\
+\midrule
+0.2 & 0.21654 & \best{0.21125} & 0.33243 & \best{0.32425} \\
+0.3 & 0.26781 & \best{0.25771} & 0.38071 & \best{0.36916} \\
+0.4 & 0.33105 & \best{0.31652} & 0.43259 & \best{0.41903} \\
+0.5 & 0.40632 & \best{0.38791} & 0.48721 & \best{0.47265} \\
+\midrule
+\multicolumn{5}{l}{\textit{Scenario B: Block Masking}} \\
+\midrule
+0.1 & \best{0.17865} & 0.18032 & 0.28865 & \best{0.28800} \\
+0.2 & 0.21275 & \best{0.21073} & 0.32435 & \best{0.32018} \\
+0.3 & 0.25119 & \best{0.24642} & 0.36020 & \best{0.35359} \\
+0.4 & 0.29076 & \best{0.28314} & 0.39434 & \best{0.38575} \\
+0.5 & 0.32823 & \best{0.31925} & 0.42386 & \best{0.41464} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\section{Conclusion}
+This paper presented Time-Mac, a multimodal time-series forecasting framework that combines a reconstruction-oriented MAE visual encoder and a coupled-Mamba fusion module, with an optional post-hoc calibration plugin for interval estimation. Experimental results across seven benchmark datasets demonstrate that Time-Mac achieves competitive forecasting performance and exhibits clear robustness advantages under severe missing-observation settings, reducing MSE by up to 4.5\% under random masking and 2.7\% under block masking at a mask ratio of 0.5. The implemented online calibration plugin further offers a practical post-hoc option for coverage-oriented interval estimation, although the main empirical analysis in this paper focuses on point forecasting accuracy and missing-observation robustness. Future work will investigate stronger real multimodal inputs, more adaptive fusion mechanisms, and broader evaluation under distribution shift and cross-domain transfer.
+\newpage
+\bibliographystyle{IEEEtran}
+\bibliography{reference}
+\end{document}

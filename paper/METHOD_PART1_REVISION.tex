@@ -1,0 +1,60 @@
+\subsection{Reconstruction-Oriented MAE Visual Encoder}
+
+Although the overall framework follows a VLM-inspired multimodal forecasting architecture, this part focuses specifically on the visual branch. The reconstruction-oriented MAE visual encoder is responsible for extracting visual features. Compared with conventional visual backbones, the MAE encoder is better suited for handling the abstract pixel-texture images derived from the transformation of time-series data.
+
+We first convert the normalized multivariate time series into an image using a learnable mapper. This provides a consistent visual input for the encoder without requiring external image data. The converted image is then fed into a pretrained MAE encoder. During pretraining, MAE learns to preserve fine-grained structure by reconstructing heavily masked images. This property makes it particularly suitable for time-series-derived images and is expected to improve tolerance to artifacts or noise introduced by the TS-to-Image conversion.
+
+To further exploit this property, we do not rely only on a standard discriminative summary representation. Instead, we construct reconstruction-conditioned visual features from the masked-image recovery process. In this way, the resulting visual embedding becomes more sensitive to temporal structures such as periodicity, trends, and discontinuities. The pooled reconstruction-oriented MAE output is used as the visual embedding $z_v \in \mathbb{R}^{B \times H}$.
+
+During the forecasting stage, the pretrained MAE mainly serves as a reconstruction-oriented visual feature extractor. The forecasting framework is optimized with the prediction loss, while no additional reconstruction loss is jointly imposed as an auxiliary objective in this stage.
+
+Formally, given a normalized multivariate time series, we first construct image-oriented features by combining raw values, spectral magnitude, and periodic priors, and then map them to a visual tensor. The resulting image is processed by the MAE encoder-decoder to derive reconstruction-conditioned visual features:
+
+\begin{gather}
+\mathbf{F}_{b,t,d,:}=
+\left[
+x_{b,t,d},
+\left|\mathcal{F}(\mathbf{x}_{b,:,d})\right|_{t},
+\sin\!\left(\frac{2\pi t}{P}\right),
+\cos\!\left(\frac{2\pi t}{P}\right)
+\right] \in \mathbb{R}^{4}, \\
+\mathbf{I}=
+\operatorname{Resize}\!\Big(
+\phi_{2D}\big(
+\operatorname{Reshape}(\phi_{1D}(\mathbf{F}))
+\big)
+\Big)
+\in \mathbb{R}^{B \times C \times H \times W}, \\
+(\mathbf{L},\mathbf{M},\Pi)=\operatorname{MAE}_{enc}(\mathbf{I};\rho),
+\qquad
+\hat{\mathbf{I}}=\operatorname{MAE}_{dec}(\mathbf{L},\Pi), \\
+\tilde{\mathbf{z}}_{\mathrm{rec}}
+=
+\operatorname{GAP}\!\left(\hat{\mathbf{I}} \odot \mathbf{M}_{img}\right),
+\qquad
+\mathbf{z}_v=\psi\!\left(\tilde{\mathbf{z}}_{\mathrm{rec}}\right)\in\mathbb{R}^{B \times H}.
+\end{gather}
+
+In the above formulation, $x_{b,t,d}$ denotes the normalized value of variable $d$ at time step $t$ in sample $b$, and $\mathcal{F}(\cdot)$ denotes the Fourier transform along the temporal dimension. The learnable mappings $\phi_{1D}$ and $\phi_{2D}$ transform the constructed temporal features into an image representation. The MAE encoder processes the masked image with masking ratio $\rho$, and the decoder reconstructs the missing content. Finally, the reconstructed regions indicated by the mask are aggregated and projected to obtain the reconstruction-oriented visual embedding $z_v$, which is then used by the downstream multimodal fusion module.
+
+\paragraph{Revision Notes.}
+When revising the original manuscript, the following replacements are recommended:
+\begin{itemize}
+    \item Replace ``VLM encoder'' in this subsection with ``reconstruction-oriented MAE visual encoder''.
+    \item Do not make the dual-path design the main narrative of this subsection. If needed, mention it only as an optional extension.
+    \item Remove the statement that the text embedding is a zero placeholder from this subsection and move it to the later multimodal fusion/interface subsection.
+    \item Avoid claiming that the MAE backbone is directly optimized end-to-end by the forecasting loss unless the implementation truly updates the MAE backbone during forecasting.
+    \item Avoid absolute claims such as ``highly robust'' unless dedicated robustness experiments are reported. Prefer formulations such as ``is expected to improve tolerance''.
+\end{itemize}
+
+\paragraph{Optional Transition Sentence.}
+If you want to explicitly retain the connection to the full architecture, you may insert the following sentence at the beginning or end of this subsection:
+\begin{quote}
+Although the complete model is built within a VLM-inspired multimodal framework, the present subsection focuses only on the visual encoder, where the conventional visual backbone is replaced by a reconstruction-oriented MAE module.
+\end{quote}
+
+\paragraph{Optional Dual-Path Sentence.}
+If you still want to mention the dual-path variant without making it the core storyline here, you may use:
+\begin{quote}
+As an optional extension, a dual-path variant can further combine standard MAE features and reconstruction-conditioned features through a path-level fusion module. However, in the main formulation of this part, we focus on the reconstruction-oriented MAE visual encoder itself.
+\end{quote}
