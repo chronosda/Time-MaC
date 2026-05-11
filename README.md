@@ -35,13 +35,33 @@ Large datasets, checkpoints, logs, generated prediction arrays, and local caches
 
 ## Setup
 
-Create an environment with Python 3.8+ and install the dependencies:
+Create an environment with Python 3.9+ for the full Coupled-Mamba path. Install PyTorch first so `mamba-ssm` can compile or select a compatible wheel against the active Torch/CUDA environment:
+
+```bash
+conda create -n time-mac python=3.10
+conda activate time-mac
+
+# Install the PyTorch build that matches your CUDA driver first.
+# Example only; adjust the CUDA index URL for your machine.
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+pip install --no-build-isolation -r requirements.txt
+```
+
+If you only want to run the lightweight smoke test on CPU, the project has a Transformer fallback inside `src/coupled_mamba_fusion.py` when `mamba-ssm` is unavailable or CUDA is not active. For real Coupled-Mamba training, install `mamba-ssm` with CUDA support.
+
+The key Mamba-related packages are:
+
+- `mamba-ssm[causal-conv1d]`: selective state-space kernel used by Coupled-Mamba and the Mamba baseline.
+- `ninja` and `packaging`: build helpers commonly needed when compiling Mamba/CUDA extensions.
+
+General dependency installation:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-For CUDA training, install the PyTorch build that matches your GPU and driver before installing the rest of the requirements.
+For CUDA training, prefer the `--no-build-isolation` command above after PyTorch is installed. This avoids building `mamba-ssm` in an isolated environment that cannot see the active Torch installation.
 
 ## Quick Checks
 
