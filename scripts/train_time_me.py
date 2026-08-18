@@ -32,6 +32,7 @@ from utils.conformal_plugin import (
     estimate_scale_from_residuals,
 )
 from utils.metrics import StreamingMetricsAccumulator
+from utils.prompt_bank import load_dataset_prompt
 
 
 def setup_logging(save_path):
@@ -136,6 +137,9 @@ def set_seed(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, 'cudnn'):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def build_dataset_kwargs(config):
@@ -181,6 +185,14 @@ def to_serializable(obj):
 
 
 def load_best_checkpoint(model, config, device, logger):
+    canonical = os.path.join(config.save_path, 'checkpoint_best.pth')
+    if os.path.isfile(canonical):
+        state = torch.load(canonical, map_location=device)
+        model.load_state_dict(state['model_state_dict'])
+        logger.info('Loaded best checkpoint: checkpoint_best.pth')
+        return True
+
+    # Backward compatibility with checkpoints produced by older scripts.
     ckpts = [
         p for p in os.listdir(config.save_path)
         if p.startswith('checkpoint_epoch_') and p.endswith('.pth')
@@ -366,7 +378,7 @@ def apply_conformal_and_save(model, test_loader, device, config, logger):
     return None
 
 
-def save_model(model, optimizer, scheduler, epoch, loss, save_path):
+def save_model(model, optimizer, scheduler, epoch, loss, save_path, config):
     """Save model checkpoint"""
     checkpoint = {
         'epoch': epoch,
@@ -374,11 +386,12 @@ def save_model(model, optimizer, scheduler, epoch, loss, save_path):
         'optimizer_state_dict': optimizer.state_dict(),
         'scheduler_state_dict': scheduler.state_dict(),
         'loss': loss,
-        'model_info': model.get_model_info()
+        'model_info': model.get_model_info(),
+        'config': to_serializable(vars(config)),
     }
 
     os.makedirs(save_path, exist_ok=True)
-    checkpoint_path = os.path.join(save_path, f'checkpoint_epoch_{epoch}.pth')
+    checkpoint_path = os.path.join(save_path, 'checkpoint_best.pth')
     torch.save(checkpoint, checkpoint_path)
     logging.info(f'Model saved to {checkpoint_path}')
 
@@ -395,7 +408,14 @@ def main():
     # Setup logging
     logger = setup_logging(args.save_path)
     logger.info("Starting Time-me training")
+    config.dataset_description, prompt_path = load_dataset_prompt(
+        config.data,
+        config.prompt_bank_dir,
+    )
+    logger.info(f"Loaded dataset prompt: {prompt_path}")
     logger.info(f"Configuration: {config}")
+    with open(os.path.join(config.save_path, 'run_config.json'), 'w', encoding='utf-8') as f:
+        json.dump(to_serializable(vars(config)), f, indent=2, ensure_ascii=False)
 
     # Set device
     device = torch.device(config.device if torch.cuda.is_available() else 'cpu')
@@ -507,7 +527,7 @@ def main():
         # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            save_model(model, optimizer, scheduler, epoch, val_loss, args.save_path)
+            save_model(model, optimizer, scheduler, epoch, val_loss, args.save_path, config)
             patience_counter = 0
             logger.info("New best model saved!")
         else:
@@ -533,6 +553,8 @@ def main():
                 'validation_best_loss': best_val_loss,
                 'test_loss': test_loss,
                 'test_metrics': test_metrics,
+                'model_info': model.get_model_info(),
+                'config': vars(config),
             }),
             f,
             indent=2,

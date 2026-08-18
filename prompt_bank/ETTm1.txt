@@ -1,0 +1,1 @@
+ETTm1 is a 15-minute Electricity Transformer Temperature benchmark collected over two years from the first transformer station. Each observation contains the oil temperature target and six power-load variables, capturing both fine-grained short-term variation and longer periodic patterns.

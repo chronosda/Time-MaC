@@ -205,14 +205,10 @@ class VLMManager:
                 from src.TimeVLM.mae_encoder_plugin import MAEEncoderPlugin
                 self.model = MAEEncoderPlugin(self.config)
         except Exception as e:
-            print(f"MAE encoder init failed ({e}); using dummy features.")
-            self.model = None
-            self.hidden_size = 768
-            self.fusion_dim = self.hidden_size
-            self.max_input_text_length = 77
-            self.fused_feature_len = 196
-            self.use_dummy = True
-            return
+            raise RuntimeError(
+                "MAE encoder initialization failed. The main experiment does not "
+                "permit silent dummy features."
+            ) from e
         self.hidden_size = self.model.hidden_size
         self.fusion_dim = self.model.fusion_dim
         self.max_input_text_length = self.model.max_input_text_length

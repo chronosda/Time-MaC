@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${ROOT}/dataset"
 LOG_DIR="${ROOT}/logs"
 CKPT_DIR="${ROOT}/checkpoints"
+PROMPT_BANK_DIR="${ROOT}/prompt_bank"
+MAE_CKPT_DIR="${ROOT}/ckpt"
 
 mkdir -p "${LOG_DIR}" "${CKPT_DIR}"
 
@@ -22,7 +24,7 @@ dataset_root() {
   local dataset="$1"
   case "${dataset}" in
     ETTm1|ETTm2|ETTh1|ETTh2)
-      printf '%s\n' "${DATA_ROOT}"
+      printf '%s\n' "${DATA_ROOT}/ETT-small"
       ;;
     electricity)
       printf '%s\n' "${DATA_ROOT}/electricity"
@@ -72,6 +74,15 @@ run_one() {
   fi
 
   echo "[run] ${tag} dataset=${dataset} pred_len=${pred_len} split=${split}"
+  if [[ ! -f "${root_path}/${dataset}.csv" ]]; then
+    echo "Missing dataset file: ${root_path}/${dataset}.csv" >&2
+    return 1
+  fi
+  if [[ ! -f "${MAE_CKPT_DIR}/mae_visualize_vit_base.pth" ]]; then
+    echo "Missing pretrained MAE checkpoint: ${MAE_CKPT_DIR}/mae_visualize_vit_base.pth" >&2
+    return 1
+  fi
+
   python "${ROOT}/scripts/train_time_me.py" \
     --data "${dataset}" \
     --root_path "${root_path}" \
@@ -79,14 +90,25 @@ run_one() {
     --data_split "${split}" \
     --pred_len "${pred_len}" \
     --seq_len 512 \
-    --d_model 512 \
-    --batch_size 16 \
-    --epochs 15 \
-    --learning_rate 0.001 \
+    --d_model 256 \
+    --batch_size 6 \
+    --epochs 20 \
+    --learning_rate 1e-4 \
+    --seed 0 \
+    --train_subset_seed 0 \
     --num_workers 4 \
     --use_gpu \
     --gpu "${GPU}" \
-    --vlm_type clip \
+    --vlm_type mae \
+    --use_reconstruction_mae \
+    --use_reconstruction_features \
+    --use_enhanced_fusion \
+    --three_channel_image \
+    --mae_arch mae_base \
+    --mae_finetune_type ln \
+    --mae_load_ckpt \
+    --mae_ckpt_dir "${MAE_CKPT_DIR}" \
+    --prompt_bank_dir "${PROMPT_BANK_DIR}" \
     > "${LOG_DIR}/${tag}.log" 2>&1
 }
 

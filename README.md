@@ -1,137 +1,148 @@
 # Time-MaC
 
-Time-MaC is a multimodal time-series forecasting project centered on masked autoencoding, coupled Mamba fusion, robustness evaluation, and conformal uncertainty calibration. The repository keeps the forecasting benchmark scaffolding from the original research codebase, but the main development target is the Time-MaC/Time-me model family in this project.
+Time-MaC is a multimodal long-term time-series forecasting model that combines a temporal memory branch, reconstruction-conditioned visual features from a pretrained masked autoencoder (MAE), dataset-aware text prompts, and enhanced Coupled-Mamba fusion.
 
 ![Time-MaC overview](docs/figures/time_me_overview_vanilla_v2_refined.png)
 
-## Highlights
+## Main experimental configuration
 
-- Coupled Mamba fusion for temporal, visual, and text-side representations.
-- MAE-based reconstruction and optimized encoder variants for time-series image features.
-- Robustness experiments for missingness, perturbation, low-resource training, and conformal calibration.
-- Public benchmark scripts for ETT, electricity, weather, and traffic forecasting settings.
-- Lightweight offline mode for environments where VLM checkpoints cannot be downloaded.
+The paper's main model uses one configuration across all seven datasets and four prediction horizons:
 
-## Repository Layout
+| Setting | Value |
+|---|---:|
+| Input length (`seq_len`) | 512 |
+| Latent dimension (`d_model`) | 256 |
+| Batch size | 6 |
+| Maximum epochs | 20 |
+| Learning rate | `1e-4` |
+| Random seed | 0 |
+| Visual branch | Pretrained reconstruction-oriented MAE |
+| Fusion branch | Enhanced Coupled-Mamba enabled |
+| Prediction horizons | 96, 192, 336, 720 |
+
+`configs/config.py` uses these values as its defaults. The main benchmark script also passes every method-defining option explicitly so its behavior can be audited from the command itself.
+
+## Text branch and prompt bank
+
+The text modality is not an empty or generic placeholder. Each supported dataset has a tracked background-description file in `prompt_bank/`:
+
+- ETTh1, ETTh2, ETTm1, and ETTm2 use dataset-specific descriptions of the ETT sampling rate, variables, and temporal structure.
+- Electricity, Weather, and Traffic use descriptions of their sensors or clients, measurement frequency, and characteristic temporal patterns.
+
+For each input sample, Time-MaC combines that fixed dataset background with the forecasting horizon, look-back length, number of variables, and input statistics (minimum, maximum, median, and trend direction). The resulting prompt is encoded by BERT and passed to the text pathway of Coupled-Mamba. This follows the dataset-description loading pattern used by the official [Time-VLM implementation](https://github.com/CityMind-Lab/ICML25-TimeVLM), while keeping the prompt files and their mapping explicit in this repository.
+
+Missing prompt files and unavailable text encoders now raise errors. The main experiment never silently substitutes zero-valued or dummy text features.
+
+## Repository layout
 
 ```text
 Time-MaC/
-├── configs/              # Time-MaC and MAE experiment configuration
-├── data_provider/        # Benchmark data loaders from the forecasting scaffold
-├── docs/                 # Project notes, experiment plans, and figures
-├── exp/                  # Forecasting experiment runners
-├── layers/               # Attention, embedding, image conversion, and MAE layers
-├── models/               # Time-MaC model, baselines, and adapters
-├── paper/                # Manuscript drafts, method text, and bibliography
-├── scripts/              # Training, benchmark, ablation, and visualization scripts
-├── src/                  # Coupled fusion and VLM-compatible components
-├── utils/                # Metrics, data loading, perturbation, and conformal utilities
-├── run.py                # General benchmark entry point
-├── train_traffic.py      # Traffic-focused training entry point
-└── test_model_simple.py  # Fast smoke test without external VLM downloads
+├── configs/                 # Model and command-line configuration
+├── data_provider/           # Forecasting benchmark data loaders
+├── docs/                    # Curated figures and documentation
+├── exp/                     # Baseline experiment runners
+├── layers/                  # Embedding, image-conversion, and MAE layers
+├── models/                  # Time-MaC model and baseline models
+├── prompt_bank/             # Dataset background text used by the text branch
+├── scripts/                 # Main training and evaluation entry points
+├── src/                     # Reconstruction MAE, VLM, and fusion components
+├── utils/                   # Data, metrics, prompt, and evaluation utilities
+├── run.py                   # Upstream-compatible baseline entry point
+└── requirements.txt
 ```
 
-Large datasets, checkpoints, logs, generated prediction arrays, and local caches are intentionally excluded from git.
+Datasets, pretrained weights, checkpoints, logs, and generated result arrays are intentionally excluded from Git.
 
-## Setup
+## Environment
 
-Create an environment with Python 3.9+ for the full Coupled-Mamba path. Install PyTorch first so `mamba-ssm` can compile or select a compatible wheel against the active Torch/CUDA environment:
+Python 3.10 is recommended. Install the PyTorch build matching the system CUDA version before installing the remaining dependencies:
 
 ```bash
 conda create -n time-mac python=3.10
 conda activate time-mac
 
-# Install the PyTorch build that matches your CUDA driver first.
-# Example only; adjust the CUDA index URL for your machine.
+# Example only: select the PyTorch/CUDA build appropriate for your machine.
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-
 pip install --no-build-isolation -r requirements.txt
 ```
 
-If you only want to run the lightweight smoke test on CPU, the project has a Transformer fallback inside `src/coupled_mamba_fusion.py` when `mamba-ssm` is unavailable or CUDA is not active. For real Coupled-Mamba training, install `mamba-ssm` with CUDA support.
+The main experiment requires a CUDA-compatible `mamba-ssm` installation. The Transformer fallback in `src/coupled_mamba_fusion.py` is intended for interface checks, not for reproducing the reported Coupled-Mamba results.
 
-The key Mamba-related packages are:
+## Data and pretrained assets
 
-- `mamba-ssm[causal-conv1d]`: selective state-space kernel used by Coupled-Mamba and the Mamba baseline.
-- `ninja` and `packaging`: build helpers commonly needed when compiling Mamba/CUDA extensions.
+Place the seven public benchmark datasets as follows:
 
-General dependency installation:
-
-```bash
-pip install -r requirements.txt
+```text
+dataset/
+├── ETT-small/
+│   ├── ETTh1.csv
+│   ├── ETTh2.csv
+│   ├── ETTm1.csv
+│   └── ETTm2.csv
+├── electricity/electricity.csv
+├── weather/weather.csv
+└── traffic/traffic.csv
 ```
 
-For CUDA training, prefer the `--no-build-isolation` command above after PyTorch is installed. This avoids building `mamba-ssm` in an isolated environment that cannot see the active Torch installation.
+ETT data are available from the official [ETDataset repository](https://github.com/zhouhaoyi/ETDataset). Electricity and Traffic follow the public multivariate benchmark data described in the [LSTNet data repository](https://github.com/laiguokun/multivariate-time-series-data).
 
-## Quick Checks
+Place the pretrained MAE-base checkpoint at:
 
-Run a lightweight model smoke test:
-
-```bash
-python test_model_simple.py
+```text
+ckpt/mae_visualize_vit_base.pth
 ```
 
-Run the full model test only when required VLM/MAE assets are available locally or network access is enabled:
+The text encoder defaults to `bert-base-uncased`. Without `--offline`, Transformers may retrieve it through its normal pretrained-model mechanism. With `--offline`, the checkpoint and tokenizer must already exist in the local cache.
 
-```bash
-python test_model.py
-```
+## Reproduce the main table
 
-## Training Examples
-
-Train the Time-MaC/Time-me model through the project-specific script:
-
-```bash
-python scripts/train_time_me.py \
-  --data ETTm2 \
-  --root_path ./dataset/ETT-small \
-  --seq_len 96 \
-  --pred_len 96 \
-  --batch_size 32
-```
-
-Run a public benchmark batch:
+Run all seven datasets at horizons 96, 192, 336, and 720:
 
 ```bash
 bash scripts/run_public_benchmark_all.sh
 ```
 
-Run robustness and missingness ablations:
+The script uses the standard chronological ETT split for ETTh1, ETTh2, ETTm1, and ETTm2, and the standard 70/10/20 chronological custom-dataset split for Electricity, Weather, and Traffic. Normalization statistics are fit only on the training partition.
+
+Each run writes:
+
+- `run_config.json`: the complete resolved configuration, including seed and prompt text;
+- `training.log`: epoch-level training and validation records;
+- `checkpoint_best.pth`: best-validation model, optimizer, scheduler, configuration, and model-size metadata;
+- `results/final_metrics.json`: test MSE/MAE and the resolved configuration.
+
+To run a single setting directly, use the same explicit model flags:
 
 ```bash
-bash scripts/run_ablation_robustness.sh
-bash scripts/run_ablation_strong_missing.sh
+python scripts/train_time_me.py \
+  --data ETTm2 \
+  --root_path ./dataset/ETT-small \
+  --save_path ./checkpoints/ettm2-p96 \
+  --data_split ett_standard \
+  --seq_len 512 \
+  --pred_len 96 \
+  --d_model 256 \
+  --batch_size 6 \
+  --epochs 20 \
+  --learning_rate 1e-4 \
+  --seed 0 \
+  --vlm_type mae \
+  --use_reconstruction_mae \
+  --use_reconstruction_features \
+  --use_enhanced_fusion \
+  --mae_load_ckpt \
+  --mae_ckpt_dir ./ckpt \
+  --prompt_bank_dir ./prompt_bank \
+  --use_gpu --gpu 0
 ```
 
-## Data and Checkpoints
+## Implementation map
 
-Place benchmark datasets under `dataset/` and model checkpoints under `checkpoints/` or `ckpt/` as needed. These directories are ignored by git because they can be very large.
+- `models/time_me.py`: full Time-MaC forward path and dataset-aware prompt construction.
+- `src/TimeVLM/mae_reconstruction_vlm.py`: pretrained MAE reconstruction features and BERT text encoding.
+- `src/coupled_mamba_fusion.py`: temporal, visual, and text pathways with cross-modal residual enhancement.
+- `utils/prompt_bank.py`: deterministic dataset-to-prompt mapping.
+- `utils/data_loader.py`: chronological split and train-only normalization logic.
+- `scripts/train_time_me.py`: training, checkpointing, metrics, and configuration recording.
 
-Recommended local layout:
-
-```text
-dataset/
-├── ETT-small/
-├── electricity/
-├── traffic/
-└── weather/
-
-checkpoints/
-ckpt/
-logs/
-predictions/
-```
-
-## Main Components
-
-- `models/time_me.py`: Time-MaC/Time-me model wrapper.
-- `src/coupled_mamba_fusion.py`: coupled Mamba multimodal fusion module.
-- Optimized MAE encoder modules under `src/`: reconstruction-oriented visual features.
-- `utils/conformal_plugin.py`: static and adaptive conformal calibration.
-- `utils/input_perturb.py`: perturbation utilities for robustness testing.
-- `scripts/eval_time_me_robustness.py`: robustness evaluation driver.
-- `scripts/visualize_intervals.py`: conformal interval visualization.
-
-## Notes
-
-This repository includes baseline forecasting models and experiment runners so Time-MaC can be compared against common time-series architectures. The documentation and default entry points are organized around the Time-MaC work rather than the upstream scaffold.
+The repository retains baseline scaffolding and optional robustness/calibration utilities for analysis, but `scripts/run_public_benchmark_all.sh` is the canonical entry point for the paper's main model.

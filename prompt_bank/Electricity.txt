@@ -1,0 +1,1 @@
+Electricity records hourly electricity consumption for 321 clients from 2012 to 2014. The multivariate series exhibits client-specific demand patterns together with strong daily, weekly, and seasonal regularities.

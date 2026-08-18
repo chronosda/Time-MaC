@@ -1,0 +1,1 @@
+ETTh2 is an hourly Electricity Transformer Temperature benchmark collected over two years from the second transformer station. Each observation contains the oil temperature target and six power-load variables, with daily, weekly, seasonal, trend, and irregular temporal patterns.

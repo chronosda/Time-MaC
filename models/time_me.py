@@ -74,6 +74,11 @@ class TimeMEModel(nn.Module):
 
         # Initialize VLM for text processing
         self.vlm_manager = VLMManager(config)
+        # VLMManager is a lightweight controller rather than an nn.Module. Register
+        # its model explicitly so trainable adapters are optimized and checkpointed.
+        if self.vlm_manager.model is None:
+            raise RuntimeError("The configured VLM failed to initialize.")
+        self.vlm_model = self.vlm_manager.model
 
         # Vision processing path inherited from the VLM-compatible scaffold.
         vision_dim = self.vlm_manager.hidden_size
@@ -305,16 +310,30 @@ class TimeMEModel(nn.Module):
         """Enhanced output denormalization"""
         return output * stdev + means
 
-    def _generate_prompts(self, batch_size, seq_len, n_vars):
-        """Enhanced prompt generation with more context"""
+    def _generate_prompts(self, x_enc):
+        """Build Time-VLM-style prompts from dataset context and sample statistics."""
+        batch_size, seq_len, n_vars = x_enc.shape
+        description = getattr(self.config, 'dataset_description', '').strip()
+        if not description:
+            raise ValueError(
+                "dataset_description is empty; load a dataset prompt before creating the model"
+            )
+
         prompts = []
         for i in range(batch_size):
-            prompt = f"Enhanced time series forecasting with coupled-mamba fusion: "
-            prompt += f"predict the next {self.config.pred_len} time steps "
-            prompt += f"based on {seq_len} historical observations of {n_vars} variables. "
-            prompt += f"Data characteristics: periodicity={self.config.periodicity}, "
-            prompt += f"prediction_horizon={self.config.pred_len}, "
-            prompt += f"model_type=enhanced_multimodal_fusion."
+            sample = x_enc[i].detach()
+            min_value = sample.min().item()
+            max_value = sample.max().item()
+            median_value = sample.median().item()
+            trend = sample.diff(dim=0).sum().item()
+            trend_direction = "upward" if trend > 0 else "downward"
+            prompt = (
+                f"Dataset background: {description} "
+                f"Task: Forecast the next {self.config.pred_len} steps from the past "
+                f"{seq_len} steps of {n_vars} variables. "
+                f"Input statistics: minimum {min_value:.3f}, maximum {max_value:.3f}, "
+                f"median {median_value:.3f}, and overall trend {trend_direction}."
+            )
             prompts.append(prompt)
         return prompts
 
@@ -326,7 +345,7 @@ class TimeMEModel(nn.Module):
         x_enc, means, stdev = self._normalize_input(x_enc)
 
         # Enhanced prompt generation
-        prompts = self._generate_prompts(B, L, D)
+        prompts = self._generate_prompts(x_enc)
 
         # Vision processing path inherited from the VLM-compatible scaffold.
         device = x_enc.device
@@ -339,12 +358,16 @@ class TimeMEModel(nn.Module):
         min_vals = images.amin(dim=(1, 2, 3), keepdim=True)
         max_vals = images.amax(dim=(1, 2, 3), keepdim=True)
         images = (images - min_vals) / (max_vals - min_vals + 1e-5)
-        pil_images = []
-        for i in range(images.shape[0]):
-            arr = (images[i].detach().permute(1, 2, 0).cpu().numpy() * 255.0).clip(0, 255).astype('uint8')
-            pil_images.append(Image.fromarray(arr))
+        if self.config.vlm_type.lower() == 'mae':
+            # Keep the tensor path differentiable for the learnable image converter.
+            vlm_images = images
+        else:
+            vlm_images = []
+            for i in range(images.shape[0]):
+                arr = (images[i].detach().permute(1, 2, 0).cpu().numpy() * 255.0).clip(0, 255).astype('uint8')
+                vlm_images.append(Image.fromarray(arr))
         batch_prompts = [prompts[i] for i in range(B)]
-        vision_embeddings, text_embeddings = self.vlm_manager.process_inputs(B, pil_images, batch_prompts)
+        vision_embeddings, text_embeddings = self.vlm_manager.process_inputs(B, vlm_images, batch_prompts)
         vision_embeddings = vision_embeddings.unsqueeze(1)  # [B, 1, hidden_size]
 
         # Enhanced prediction
@@ -358,14 +381,12 @@ class TimeMEModel(nn.Module):
     def train(self, mode=True):
         """Enhanced training mode with proper device handling"""
         super().train(mode)
-        if hasattr(self, 'mae_encoder'):
-            self.mae_encoder.train()
+        return self
 
     def eval(self):
         """Enhanced evaluation mode"""
         super().eval()
-        if hasattr(self, 'mae_encoder'):
-            self.mae_encoder.eval()
+        return self
 
     def get_model_info(self):
         """Get model information for debugging"""

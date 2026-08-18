@@ -1,0 +1,1 @@
+Weather contains 21 meteorological indicators recorded every 10 minutes throughout 2020, including air temperature, pressure, humidity, wind, and related measurements with daily and seasonal variation.

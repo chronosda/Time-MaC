@@ -1,0 +1,1 @@
+Traffic contains hourly road-occupancy rates measured by 862 sensors on San Francisco Bay Area freeways. The multivariate signals reflect recurring commuting cycles, weekly traffic patterns, and sensor-specific variation.

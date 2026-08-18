@@ -33,6 +33,10 @@ class MAEReconstructionVLM(nn.Module):
         self.finetune_type = getattr(config, 'mae_finetune_type', 'ln')
         self.ckpt_dir = getattr(config, 'mae_ckpt_dir', './ckpt/')
         self.load_ckpt = getattr(config, 'mae_load_ckpt', True)
+        self.finetune_text_encoder = getattr(config, 'finetune_vlm', False)
+        self.text_encoder_name = getattr(config, 'text_encoder_name', 'bert-base-uncased')
+        self.text_max_length = getattr(config, 'text_max_length', 77)
+        self.offline = getattr(config, 'offline', False)
 
         # Reconstruction-oriented parameters
         self.reconstruction_ratio = getattr(config, 'reconstruction_ratio', 0.3)
@@ -71,10 +75,16 @@ class MAEReconstructionVLM(nn.Module):
 
         if self.load_ckpt:
             checkpoint_path = os.path.join(self.ckpt_dir, 'mae_visualize_vit_base.pth')
-            if os.path.exists(checkpoint_path):
-                checkpoint = torch.load(checkpoint_path, map_location='cpu')
-                self.mae_model.load_state_dict(checkpoint['model'], strict=False)
-                print(f"Loaded MAE reconstruction model: {self.mae_arch}")
+            if not os.path.exists(checkpoint_path):
+                raise FileNotFoundError(
+                    f"Pretrained MAE checkpoint not found: {checkpoint_path}. "
+                    "Download mae_visualize_vit_base.pth or pass --no-mae_load_ckpt "
+                    "only for an explicit random-initialization ablation."
+                )
+            checkpoint = torch.load(checkpoint_path, map_location='cpu')
+            state_dict = checkpoint.get('model', checkpoint)
+            self.mae_model.load_state_dict(state_dict, strict=False)
+            print(f"Loaded MAE reconstruction model: {self.mae_arch}")
 
         self._setup_finetuning()
         self._setup_reconstruction_mask()
@@ -103,13 +113,23 @@ class MAEReconstructionVLM(nn.Module):
     def _init_text_processor(self):
         try:
             from transformers import BertTokenizer, BertModel
-            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-            self.text_encoder = BertModel.from_pretrained('bert-base-uncased')
-            self.text_projection = nn.Linear(768, 768)
-        except Exception:
-            self.tokenizer = None
-            self.text_encoder = None
-            self.text_projection = nn.Linear(768, 768)
+            self.tokenizer = BertTokenizer.from_pretrained(
+                self.text_encoder_name,
+                local_files_only=self.offline,
+            )
+            self.text_encoder = BertModel.from_pretrained(
+                self.text_encoder_name,
+                local_files_only=self.offline,
+            )
+            for parameter in self.text_encoder.parameters():
+                parameter.requires_grad = self.finetune_text_encoder
+            self.text_projection = nn.Linear(self.text_encoder.config.hidden_size, 768)
+        except Exception as exc:
+            mode = "local cache" if self.offline else "configured source"
+            raise RuntimeError(
+                f"Could not load text encoder '{self.text_encoder_name}' from {mode}. "
+                "The main Time-MaC model requires a real text branch."
+            ) from exc
 
     def _init_reconstruction_enhancer(self):
         if self.use_reconstruction_features:
@@ -120,17 +140,8 @@ class MAEReconstructionVLM(nn.Module):
                 nn.Linear(1024, 768),
                 nn.LayerNorm(768)
             )
-            if self.multimodal_fusion_type == 'reconstruction_aware':
-                self.multimodal_fusion = ReconstructionAwareFusion(768)
-            else:
-                self.multimodal_fusion = nn.Sequential(
-                    nn.Linear(768 * 2, 768),
-                    nn.ReLU(),
-                    nn.Linear(768, 768)
-                )
         else:
             self.reconstruction_enhancer = nn.Identity()
-            self.multimodal_fusion = nn.Identity()
 
     def _set_feature_dimensions(self):
         if self.mae_arch == 'mae_base':
@@ -150,7 +161,7 @@ class MAEReconstructionVLM(nn.Module):
         ).to(self.device)
 
     def forward(self, images, texts=None):
-        reconstruction_features, original_features = self._mae_reconstruction_forward(images)
+        reconstruction_features = self._mae_reconstruction_forward(images)
 
         enhanced_features = self.reconstruction_enhancer(reconstruction_features)
 
@@ -160,28 +171,23 @@ class MAEReconstructionVLM(nn.Module):
             batch_size = enhanced_features.shape[0]
             text_features = torch.zeros(batch_size, self.hidden_size).to(self.device)
 
-        if self.use_reconstruction_features:
-            fused_features = self.multimodal_fusion(enhanced_features, text_features)
-        else:
-            fused_features = enhanced_features
-
-        return fused_features, text_features
+        # Keep the reconstruction-conditioned visual embedding and dataset-text
+        # embedding separate. Their cross-modal interaction is performed once by
+        # the Coupled-Mamba fusion module in the main model.
+        return enhanced_features, text_features
 
     def _mae_reconstruction_forward(self, images):
         images = self._preprocess_images(images)
         images = images.to(self.device)
 
-        with torch.no_grad():
+        with torch.set_grad_enabled(self.training):
             latent, mask, ids_restore = self.mae_model.forward_encoder(images, self.reconstruction_ratio)
             pred = self.mae_model.forward_decoder(latent, ids_restore)
-
-            original_features = self.mae_model.forward_encoder(images, 0.0)[0]
-            original_features = original_features[:, 0, :]
 
             reconstructed_patches = self.mae_model.unpatchify(pred)
             reconstruction_features = self._extract_reconstruction_features(reconstructed_patches, mask)
 
-        return reconstruction_features, original_features
+        return reconstruction_features
 
     def _extract_reconstruction_features(self, reconstructed_patches, mask):
         batch_size = reconstructed_patches.shape[0]
@@ -211,7 +217,9 @@ class MAEReconstructionVLM(nn.Module):
                 images = F.interpolate(images, size=(224, 224), mode='bicubic')
             elif images.dtype == torch.uint8:
                 images = images.float() / 255.0
-            return images
+            mean = images.new_tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+            std = images.new_tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+            return (images - mean) / std
 
         preprocess = transforms.Compose([
             transforms.Resize((224, 224)),
@@ -228,14 +236,24 @@ class MAEReconstructionVLM(nn.Module):
             texts,
             padding=True,
             truncation=True,
-            max_length=77,
+            max_length=self.text_max_length,
             return_tensors='pt'
         )
         input_ids = encoded['input_ids'].to(self.device)
         attention_mask = encoded['attention_mask'].to(self.device)
         text_outputs = self.text_encoder(input_ids=input_ids, attention_mask=attention_mask)
-        text_features = text_outputs.last_hidden_state.mean(dim=1)
+        token_mask = attention_mask.unsqueeze(-1).to(text_outputs.last_hidden_state.dtype)
+        text_features = (text_outputs.last_hidden_state * token_mask).sum(dim=1)
+        text_features = text_features / token_mask.sum(dim=1).clamp_min(1.0)
         return self.text_projection(text_features)
+
+    def train(self, mode=True):
+        super().train(mode)
+        if not self.finetune_text_encoder:
+            self.text_encoder.eval()
+        if self.finetune_type == 'none':
+            self.mae_model.eval()
+        return self
 
     def get_reconstruction_loss(self, images):
         images = self._preprocess_images(images)

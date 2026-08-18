@@ -8,7 +8,7 @@ import torch
 class TimeMEConfig:
     """Configuration for Time-me model"""
     # Basic model parameters
-    d_model: int = 512
+    d_model: int = 256
     pred_len: int = 96
     seq_len: int = 512
     enc_in: int = 7
@@ -35,10 +35,10 @@ class TimeMEConfig:
 
     # Training parameters
     dropout: float = 0.1
-    learning_rate: float = 0.001
+    learning_rate: float = 1e-4
     weight_decay: float = 1e-5
-    batch_size: int = 32
-    epochs: int = 100
+    batch_size: int = 6
+    epochs: int = 20
 
     # Device parameters
     use_gpu: bool = True
@@ -64,15 +64,19 @@ class TimeMEConfig:
     num_workers: int = 0
 
     # VLM parameters
-    vlm_type: str = 'clip'  # options: clip, blip2, vilt, custom, mae
+    vlm_type: str = 'mae'  # options: clip, blip2, vilt, custom, mae
     finetune_vlm: bool = False
+    text_encoder_name: str = 'bert-base-uncased'
+    text_max_length: int = 77
+    prompt_bank_dir: str = './prompt_bank'
+    dataset_description: str = ''
     mae_arch: str = 'mae_base'
     mae_finetune_type: str = 'ln'
     mae_ckpt_dir: str = './ckpt/'
-    mae_load_ckpt: bool = False
+    mae_load_ckpt: bool = True
 
     # Reconstruction-oriented MAE flags
-    use_reconstruction_mae: bool = False
+    use_reconstruction_mae: bool = True
     use_dual_path_reconstruction: bool = False
     use_optimized_mae: bool = False
 
@@ -139,14 +143,19 @@ def get_args():
     parser = argparse.ArgumentParser(description='Time-MaC: time-series forecasting with Coupled-Mamba fusion')
 
     # Model parameters
-    parser.add_argument('--d_model', type=int, default=512, help='dimension of model')
+    parser.add_argument('--d_model', type=int, default=256, help='dimension of model')
     parser.add_argument('--pred_len', type=int, default=96, help='prediction sequence length')
     parser.add_argument('--seq_len', type=int, default=512, help='input sequence length')
     parser.add_argument('--enc_in', type=int, default=7, help='encoder input size')
     parser.add_argument('--c_out', type=int, default=7, help='output size')
 
     # Enhanced fusion parameters
-    parser.add_argument('--use_enhanced_fusion', action='store_true', help='use enhanced coupled-mamba fusion')
+    parser.add_argument(
+        '--use_enhanced_fusion',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='enable enhanced coupled-mamba fusion (use --no-use_enhanced_fusion for ablations)',
+    )
     parser.add_argument('--mamba_layers', type=int, default=2, help='number of mamba layers')
     parser.add_argument('--use_mae_vision', action='store_true', help='use MAE for vision encoding')
     parser.add_argument('--use_timebase_backbone', action='store_true',
@@ -154,7 +163,12 @@ def get_args():
 
     # Vision parameters
     parser.add_argument('--image_size', type=int, default=224, help='image size for vision encoding')
-    parser.add_argument('--three_channel_image', action='store_true', help='use three channel images')
+    parser.add_argument(
+        '--three_channel_image',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='use three-channel time-series images',
+    )
     parser.add_argument('--patch_len', type=int, default=16, help='patch length')
     parser.add_argument('--stride', type=int, default=8, help='stride for patch embedding')
     parser.add_argument('--padding', type=int, default=0, help='padding for patch embedding')
@@ -166,9 +180,9 @@ def get_args():
 
     # Training parameters
     parser.add_argument('--dropout', type=float, default=0.1, help='dropout rate')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='learning rate')
-    parser.add_argument('--batch_size', type=int, default=32, help='batch size')
-    parser.add_argument('--epochs', type=int, default=100, help='number of epochs')
+    parser.add_argument('--learning_rate', type=float, default=1e-4, help='learning rate')
+    parser.add_argument('--batch_size', type=int, default=6, help='batch size')
+    parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
 
     # Device parameters
     parser.add_argument('--use_gpu', action='store_true', help='use GPU')
@@ -191,21 +205,39 @@ def get_args():
     parser.add_argument('--num_workers', type=int, default=0, help='DataLoader worker count')
 
     # VLM parameters
-    parser.add_argument('--vlm_type', type=str, default='clip', help='VLM type: clip|blip2|vilt|custom|mae')
+    parser.add_argument('--vlm_type', type=str, default='mae', help='VLM type: clip|blip2|vilt|custom|mae')
     parser.add_argument('--finetune_vlm', action='store_true', help='finetune VLM parameters')
     parser.add_argument('--offline', action='store_true', help='run in offline mode (no remote downloads)')
+    parser.add_argument('--text_encoder_name', type=str, default='bert-base-uncased', help='text encoder checkpoint')
+    parser.add_argument('--text_max_length', type=int, default=77, help='maximum number of text tokens')
+    parser.add_argument('--prompt_bank_dir', type=str, default='./prompt_bank', help='dataset prompt-bank directory')
     # MAE checkpoint controls
     parser.add_argument('--mae_arch', type=str, default='mae_base', help='MAE architecture: mae_base|mae_large|mae_huge')
     parser.add_argument('--mae_finetune_type', type=str, default='ln', help='MAE finetune type: none|ln|bias|mlp|attn|full|enhanced|adaptive')
     parser.add_argument('--mae_ckpt_dir', type=str, default='./ckpt/', help='directory containing MAE checkpoints')
-    parser.add_argument('--mae_load_ckpt', action='store_true', help='load MAE checkpoint weights')
+    parser.add_argument(
+        '--mae_load_ckpt',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='load pretrained MAE checkpoint weights',
+    )
 
     # Reconstruction-oriented MAE options
-    parser.add_argument('--use_reconstruction_mae', action='store_true', help='use reconstruction-oriented MAE encoder')
+    parser.add_argument(
+        '--use_reconstruction_mae',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='use reconstruction-oriented MAE encoder',
+    )
     parser.add_argument('--use_dual_path_reconstruction', action='store_true', help='use dual-path reconstruction VLM')
     parser.add_argument('--use_optimized_mae', action='store_true', help='use optimized MAE encoder for time series')
     parser.add_argument('--reconstruction_ratio', type=float, default=0.3, help='mask ratio for MAE reconstruction')
-    parser.add_argument('--use_reconstruction_features', action='store_true', help='use reconstruction features in fusion')
+    parser.add_argument(
+        '--use_reconstruction_features',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='enhance reconstruction-conditioned visual features before fusion',
+    )
     parser.add_argument('--multimodal_fusion_type', type=str, default='reconstruction_aware', help='fusion: reconstruction_aware|simple')
     parser.add_argument('--use_vlm_path', action='store_true', help='enable standard VLM path in dual-path encoder')
     parser.add_argument('--use_reconstruction_path', action='store_true', help='enable MAE reconstruction path in dual-path encoder')
