@@ -100,6 +100,10 @@ run_one() {
     --use_gpu \
     --gpu "${GPU}" \
     --vlm_type mae \
+    --context_encoder_type structured \
+    --dataset_embedding_dim 32 \
+    --context_hidden_dim 128 \
+    --context_output_dim 256 \
     --use_reconstruction_mae \
     --use_reconstruction_features \
     --use_enhanced_fusion \

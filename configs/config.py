@@ -66,7 +66,14 @@ class TimeMEConfig:
     # VLM parameters
     vlm_type: str = 'mae'  # options: clip, blip2, vilt, custom, mae
     finetune_vlm: bool = False
-    text_encoder_name: str = 'bert-base-uncased'
+    context_encoder_type: str = 'structured'  # structured|bert
+    text_encoder_name: str = 'google/bert_uncased_L-2_H-128_A-2'
+    # Project the pretrained text encoder output directly to the fusion width.
+    text_projection_dim: int = 256
+    dataset_embedding_dim: int = 32
+    context_hidden_dim: int = 128
+    context_output_dim: int = 256
+    context_length_scale: float = 1024.0
     text_max_length: int = 77
     prompt_bank_dir: str = './prompt_bank'
     dataset_description: str = ''
@@ -208,7 +215,29 @@ def get_args():
     parser.add_argument('--vlm_type', type=str, default='mae', help='VLM type: clip|blip2|vilt|custom|mae')
     parser.add_argument('--finetune_vlm', action='store_true', help='finetune VLM parameters')
     parser.add_argument('--offline', action='store_true', help='run in offline mode (no remote downloads)')
-    parser.add_argument('--text_encoder_name', type=str, default='bert-base-uncased', help='text encoder checkpoint')
+    parser.add_argument(
+        '--context_encoder_type',
+        type=str,
+        default='structured',
+        choices=['structured', 'bert'],
+        help='encode context as normalized numeric features or as a language prompt',
+    )
+    parser.add_argument(
+        '--text_encoder_name',
+        type=str,
+        default='google/bert_uncased_L-2_H-128_A-2',
+        help='pretrained text encoder checkpoint',
+    )
+    parser.add_argument(
+        '--text_projection_dim',
+        type=int,
+        default=256,
+        help='output dimension of the text projection before multimodal fusion',
+    )
+    parser.add_argument('--dataset_embedding_dim', type=int, default=32)
+    parser.add_argument('--context_hidden_dim', type=int, default=128)
+    parser.add_argument('--context_output_dim', type=int, default=256)
+    parser.add_argument('--context_length_scale', type=float, default=1024.0)
     parser.add_argument('--text_max_length', type=int, default=77, help='maximum number of text tokens')
     parser.add_argument('--prompt_bank_dir', type=str, default='./prompt_bank', help='dataset prompt-bank directory')
     # MAE checkpoint controls

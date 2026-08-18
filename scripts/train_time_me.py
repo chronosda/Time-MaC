@@ -408,11 +408,15 @@ def main():
     # Setup logging
     logger = setup_logging(args.save_path)
     logger.info("Starting Time-me training")
-    config.dataset_description, prompt_path = load_dataset_prompt(
-        config.data,
-        config.prompt_bank_dir,
-    )
-    logger.info(f"Loaded dataset prompt: {prompt_path}")
+    if config.context_encoder_type == 'bert':
+        config.dataset_description, prompt_path = load_dataset_prompt(
+            config.data,
+            config.prompt_bank_dir,
+        )
+        logger.info(f"Loaded dataset prompt: {prompt_path}")
+    else:
+        config.dataset_description = ''
+        logger.info("Using structured numeric context; no language prompt loaded")
     logger.info(f"Configuration: {config}")
     with open(os.path.join(config.save_path, 'run_config.json'), 'w', encoding='utf-8') as f:
         json.dump(to_serializable(vars(config)), f, indent=2, ensure_ascii=False)

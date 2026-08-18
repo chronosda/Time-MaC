@@ -9,6 +9,7 @@ from PIL import Image
 # Import custom modules
 from src.coupled_mamba_fusion import CoupledMambaFusion
 from src.TimeVLM.vlm_manager import VLMManager
+from src.TimeVLM.structured_context import StructuredContextEncoder
 from layers.Embed import PatchEmbedding
 from layers.Learnable_TimeSeries_To_Image import LearnableTimeSeriesToImage
 from layers.TimeSeries_To_Image import time_series_to_simple_image
@@ -79,9 +80,27 @@ class TimeMEModel(nn.Module):
         if self.vlm_manager.model is None:
             raise RuntimeError("The configured VLM failed to initialize.")
         self.vlm_model = self.vlm_manager.model
+        self.context_encoder_type = getattr(
+            config,
+            'context_encoder_type',
+            'structured',
+        ).lower()
+        if self.context_encoder_type == 'structured':
+            self.context_encoder = StructuredContextEncoder(config)
+        elif self.context_encoder_type == 'bert':
+            self.context_encoder = None
+        else:
+            raise ValueError(
+                "context_encoder_type must be either 'structured' or 'bert'"
+            )
 
         # Vision processing path inherited from the VLM-compatible scaffold.
-        vision_dim = self.vlm_manager.hidden_size
+        vision_dim = self.vlm_manager.vision_hidden_size
+        if self.context_encoder is not None:
+            text_dim = self.context_encoder.output_dim
+        else:
+            text_dim = self.vlm_manager.text_hidden_size
+        self.context_dim = text_dim
 
         # Initialize enhanced patch memory bank
         self.patch_memory_bank = PatchMemoryBank(
@@ -91,13 +110,10 @@ class TimeMEModel(nn.Module):
             device=self.device
         )
 
-        # Determine vision dimension
-        vision_dim = self.vlm_manager.hidden_size
-
         # Initialize core modules
-        self._init_modules(config, vision_dim)
+        self._init_modules(config, vision_dim, text_dim)
 
-    def _init_modules(self, config, vision_dim):
+    def _init_modules(self, config, vision_dim, text_dim):
         """Initialize all model modules with proper configuration"""
         # Patch embedding for temporal features (default backbone)
         self.patch_embedding = PatchEmbedding(
@@ -145,7 +161,7 @@ class TimeMEModel(nn.Module):
             self.coupled_mamba_fusion = CoupledMambaFusion(
                 config=config,
                 vision_dim=vision_dim,
-                text_dim=self.vlm_manager.hidden_size,
+                text_dim=text_dim,
                 d_model=config.d_model
             )
         else:
@@ -344,8 +360,10 @@ class TimeMEModel(nn.Module):
         # Enhanced input normalization
         x_enc, means, stdev = self._normalize_input(x_enc)
 
-        # Enhanced prompt generation
-        prompts = self._generate_prompts(x_enc)
+        # The structured path avoids converting numeric context into English.
+        prompts = None
+        if self.context_encoder is None:
+            prompts = self._generate_prompts(x_enc)
 
         # Vision processing path inherited from the VLM-compatible scaffold.
         device = x_enc.device
@@ -366,8 +384,17 @@ class TimeMEModel(nn.Module):
             for i in range(images.shape[0]):
                 arr = (images[i].detach().permute(1, 2, 0).cpu().numpy() * 255.0).clip(0, 255).astype('uint8')
                 vlm_images.append(Image.fromarray(arr))
-        batch_prompts = [prompts[i] for i in range(B)]
-        vision_embeddings, text_embeddings = self.vlm_manager.process_inputs(B, vlm_images, batch_prompts)
+        batch_prompts = None if prompts is None else [prompts[i] for i in range(B)]
+        vision_embeddings, text_embeddings = self.vlm_manager.process_inputs(
+            B,
+            vlm_images,
+            batch_prompts,
+        )
+        if self.context_encoder is not None:
+            text_embeddings = self.context_encoder(
+                x_enc,
+                getattr(self.config, 'data', ''),
+            )
         vision_embeddings = vision_embeddings.unsqueeze(1)  # [B, 1, hidden_size]
 
         # Enhanced prediction
@@ -398,6 +425,14 @@ class TimeMEModel(nn.Module):
             'pred_len': self.config.pred_len,
             'seq_len': self.config.seq_len,
             'n_vars': getattr(self.config, 'enc_in', 1),
+            'text_encoder_name': (
+                getattr(self.config, 'text_encoder_name', '')
+                if self.context_encoder_type == 'bert'
+                else None
+            ),
+            'context_encoder_type': self.context_encoder_type,
+            'vision_dim': self.vlm_manager.vision_hidden_size,
+            'text_dim': self.context_dim,
             'total_params': sum(p.numel() for p in self.parameters()),
             'trainable_params': sum(p.numel() for p in self.parameters() if p.requires_grad)
         }

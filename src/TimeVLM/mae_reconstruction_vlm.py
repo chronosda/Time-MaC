@@ -34,7 +34,28 @@ class MAEReconstructionVLM(nn.Module):
         self.ckpt_dir = getattr(config, 'mae_ckpt_dir', './ckpt/')
         self.load_ckpt = getattr(config, 'mae_load_ckpt', True)
         self.finetune_text_encoder = getattr(config, 'finetune_vlm', False)
-        self.text_encoder_name = getattr(config, 'text_encoder_name', 'bert-base-uncased')
+        self.context_encoder_type = getattr(
+            config,
+            'context_encoder_type',
+            'structured',
+        ).lower()
+        if self.context_encoder_type not in {'structured', 'bert'}:
+            raise ValueError(
+                "context_encoder_type must be either 'structured' or 'bert'"
+            )
+        self.text_encoder_name = getattr(
+            config,
+            'text_encoder_name',
+            'google/bert_uncased_L-2_H-128_A-2',
+        )
+        self.text_projection_dim = int(
+            getattr(config, 'text_projection_dim', getattr(config, 'd_model', 256))
+        )
+        self.context_output_dim = int(
+            getattr(config, 'context_output_dim', getattr(config, 'd_model', 256))
+        )
+        if self.text_projection_dim <= 0:
+            raise ValueError("text_projection_dim must be a positive integer")
         self.text_max_length = getattr(config, 'text_max_length', 77)
         self.offline = getattr(config, 'offline', False)
 
@@ -46,8 +67,14 @@ class MAEReconstructionVLM(nn.Module):
         # Init MAE with reconstruction
         self._init_mae_reconstruction()
 
-        # Init text processor (optional, for compatibility)
-        self._init_text_processor()
+        # The structured context path intentionally registers no tokenizer or
+        # language-model parameters.
+        if self.context_encoder_type == 'bert':
+            self._init_text_processor()
+        else:
+            self.tokenizer = None
+            self.text_encoder = None
+            self.text_projection = None
 
         # Init reconstruction feature enhancer
         self._init_reconstruction_enhancer()
@@ -123,7 +150,10 @@ class MAEReconstructionVLM(nn.Module):
             )
             for parameter in self.text_encoder.parameters():
                 parameter.requires_grad = self.finetune_text_encoder
-            self.text_projection = nn.Linear(self.text_encoder.config.hidden_size, 768)
+            self.text_projection = nn.Linear(
+                self.text_encoder.config.hidden_size,
+                self.text_projection_dim,
+            )
         except Exception as exc:
             mode = "local cache" if self.offline else "configured source"
             raise RuntimeError(
@@ -151,6 +181,11 @@ class MAEReconstructionVLM(nn.Module):
         elif self.mae_arch == 'mae_huge':
             self.hidden_size = 1280
         self.fusion_dim = self.hidden_size
+        self.vision_hidden_size = self.hidden_size
+        if self.context_encoder_type == 'bert':
+            self.text_hidden_size = self.text_projection_dim
+        else:
+            self.text_hidden_size = self.context_output_dim
         self.max_input_text_length = 77
         self.fused_feature_len = self.hidden_size
 
@@ -169,7 +204,7 @@ class MAEReconstructionVLM(nn.Module):
             text_features = self._encode_text(texts)
         else:
             batch_size = enhanced_features.shape[0]
-            text_features = torch.zeros(batch_size, self.hidden_size).to(self.device)
+            text_features = torch.zeros(batch_size, self.text_hidden_size).to(self.device)
 
         # Keep the reconstruction-conditioned visual embedding and dataset-text
         # embedding separate. Their cross-modal interaction is performed once by
@@ -249,7 +284,7 @@ class MAEReconstructionVLM(nn.Module):
 
     def train(self, mode=True):
         super().train(mode)
-        if not self.finetune_text_encoder:
+        if self.text_encoder is not None and not self.finetune_text_encoder:
             self.text_encoder.eval()
         if self.finetune_type == 'none':
             self.mae_model.eval()
@@ -291,4 +326,3 @@ class ReconstructionAwareFusion(nn.Module):
         fused_features = torch.cat([weighted_vision, weighted_text], dim=-1)
         fused_features = self.fusion_layer(fused_features)
         return fused_features
-

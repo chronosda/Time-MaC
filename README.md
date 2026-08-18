@@ -1,6 +1,6 @@
 # Time-MaC
 
-Time-MaC is a multimodal long-term time-series forecasting model that combines a temporal memory branch, reconstruction-conditioned visual features from a pretrained masked autoencoder (MAE), dataset-aware text prompts, and enhanced Coupled-Mamba fusion.
+Time-MaC is a multimodal long-term time-series forecasting model that combines a temporal memory branch, reconstruction-conditioned visual features from a pretrained masked autoencoder (MAE), dataset-aware structured context, and enhanced Coupled-Mamba fusion.
 
 ![Time-MaC overview](docs/figures/time_me_overview_vanilla_v2_refined.png)
 
@@ -22,16 +22,19 @@ The paper's main model uses one configuration across all seven datasets and four
 
 `configs/config.py` uses these values as its defaults. The main benchmark script also passes every method-defining option explicitly so its behavior can be audited from the command itself.
 
-## Text branch and prompt bank
+## Structured context branch
 
-The text modality is not an empty or generic placeholder. Each supported dataset has a tracked background-description file in `prompt_bank/`:
+The main model sends numeric context directly to the context pathway of
+Coupled-Mamba instead of first rendering statistics as English text. It embeds
+the identity of the seven supported datasets into 32 dimensions, concatenates
+six normalized features (minimum, maximum, median, trend, look-back length, and
+forecast horizon), and applies a `38 -> 128 -> 256` MLP. This branch has 38,240
+trainable parameters and does not instantiate a tokenizer or language model.
 
-- ETTh1, ETTh2, ETTm1, and ETTm2 use dataset-specific descriptions of the ETT sampling rate, variables, and temporal structure.
-- Electricity, Weather, and Traffic use descriptions of their sensors or clients, measurement frequency, and characteristic temporal patterns.
-
-For each input sample, Time-MaC combines that fixed dataset background with the forecasting horizon, look-back length, number of variables, and input statistics (minimum, maximum, median, and trend direction). The resulting prompt is encoded by BERT and passed to the text pathway of Coupled-Mamba. This follows the dataset-description loading pattern used by the official [Time-VLM implementation](https://github.com/CityMind-Lab/ICML25-TimeVLM), while keeping the prompt files and their mapping explicit in this repository.
-
-Missing prompt files and unavailable text encoders now raise errors. The main experiment never silently substitutes zero-valued or dummy text features.
+The previous pretrained-language-encoder path remains available as an ablation
+with `--context_encoder_type bert`. In that mode, the tracked descriptions in
+`prompt_bank/` are combined with sample statistics and encoded by the configured
+BERT checkpoint.
 
 ## Repository layout
 
@@ -92,7 +95,11 @@ Place the pretrained MAE-base checkpoint at:
 ckpt/mae_visualize_vit_base.pth
 ```
 
-The text encoder defaults to `bert-base-uncased`. Without `--offline`, Transformers may retrieve it through its normal pretrained-model mechanism. With `--offline`, the checkpoint and tokenizer must already exist in the local cache.
+The default structured context branch has no external text checkpoint. For the
+BERT ablation, the configured default is Google's pretrained BERT-Tiny checkpoint
+`google/bert_uncased_L-2_H-128_A-2`, projected from 128 to 256 dimensions. Without
+`--offline`, Transformers may retrieve it through the normal pretrained-model
+mechanism; with `--offline`, it must already exist in the local cache.
 
 ## Reproduce the main table
 
@@ -106,7 +113,7 @@ The script uses the standard chronological ETT split for ETTh1, ETTh2, ETTm1, an
 
 Each run writes:
 
-- `run_config.json`: the complete resolved configuration, including seed and prompt text;
+- `run_config.json`: the complete resolved configuration, including seed and context-encoder settings;
 - `training.log`: epoch-level training and validation records;
 - `checkpoint_best.pth`: best-validation model, optimizer, scheduler, configuration, and model-size metadata;
 - `results/final_metrics.json`: test MSE/MAE and the resolved configuration.
@@ -127,21 +134,25 @@ python scripts/train_time_me.py \
   --learning_rate 1e-4 \
   --seed 0 \
   --vlm_type mae \
+  --context_encoder_type structured \
+  --dataset_embedding_dim 32 \
+  --context_hidden_dim 128 \
+  --context_output_dim 256 \
   --use_reconstruction_mae \
   --use_reconstruction_features \
   --use_enhanced_fusion \
   --mae_load_ckpt \
   --mae_ckpt_dir ./ckpt \
-  --prompt_bank_dir ./prompt_bank \
   --use_gpu --gpu 0
 ```
 
 ## Implementation map
 
-- `models/time_me.py`: full Time-MaC forward path and dataset-aware prompt construction.
-- `src/TimeVLM/mae_reconstruction_vlm.py`: pretrained MAE reconstruction features and BERT text encoding.
-- `src/coupled_mamba_fusion.py`: temporal, visual, and text pathways with cross-modal residual enhancement.
-- `utils/prompt_bank.py`: deterministic dataset-to-prompt mapping.
+- `models/time_me.py`: full Time-MaC forward path and context routing.
+- `src/TimeVLM/structured_context.py`: dataset embedding and normalized numeric context MLP.
+- `src/TimeVLM/mae_reconstruction_vlm.py`: pretrained MAE reconstruction features and optional BERT ablation.
+- `src/coupled_mamba_fusion.py`: temporal, visual, and context pathways with cross-modal residual enhancement.
+- `utils/prompt_bank.py`: deterministic dataset-to-prompt mapping for the BERT ablation.
 - `utils/data_loader.py`: chronological split and train-only normalization logic.
 - `scripts/train_time_me.py`: training, checkpointing, metrics, and configuration recording.
 

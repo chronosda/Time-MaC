@@ -21,6 +21,10 @@ class VLMManager:
         self.offline = getattr(self.config, 'offline', False)
         self.use_dummy = False
         self._init_vlm()
+        if not hasattr(self, 'vision_hidden_size'):
+            self.vision_hidden_size = self.hidden_size
+        if not hasattr(self, 'text_hidden_size'):
+            self.text_hidden_size = self.hidden_size
         
     def _acquire_device(self):
         if self.config.use_gpu and torch.cuda.is_available():
@@ -210,6 +214,16 @@ class VLMManager:
                 "permit silent dummy features."
             ) from e
         self.hidden_size = self.model.hidden_size
+        self.vision_hidden_size = getattr(
+            self.model,
+            'vision_hidden_size',
+            self.hidden_size,
+        )
+        self.text_hidden_size = getattr(
+            self.model,
+            'text_hidden_size',
+            self.hidden_size,
+        )
         self.fusion_dim = self.model.fusion_dim
         self.max_input_text_length = self.model.max_input_text_length
         self.fused_feature_len = self.model.fused_feature_len
@@ -217,7 +231,10 @@ class VLMManager:
         # MAE doesn't have multimodal fusion gate like CLIP/BLIP2
         # But we can add a simple one for compatibility
         self.multimodal_fusion_gate = nn.Sequential(
-            nn.Linear(2 * self.hidden_size, self.hidden_size),
+            nn.Linear(
+                self.vision_hidden_size + self.text_hidden_size,
+                self.hidden_size,
+            ),
             nn.ReLU(),
             nn.Linear(self.hidden_size, 1),
             nn.Sigmoid()
@@ -234,8 +251,8 @@ class VLMManager:
             if getattr(self, 'use_dummy', False):
                 device = self.device
                 return (
-                    torch.zeros(B, self.hidden_size, device=device),
-                    torch.zeros(B, self.hidden_size, device=device)
+                    torch.zeros(B, self.vision_hidden_size, device=device),
+                    torch.zeros(B, self.text_hidden_size, device=device)
                 )
             if self.vlm_type == "clip":
                 return self._process_clip_inputs(B, images, prompts)
@@ -256,9 +273,9 @@ class VLMManager:
     def encode_text(self, prompts):
         """Optional text encoding; returns zeros in offline/dummy mode."""
         if getattr(self, 'use_dummy', False):
-            return torch.zeros(len(prompts), self.hidden_size, device=self.device)
+            return torch.zeros(len(prompts), self.text_hidden_size, device=self.device)
         # Minimal implementation to avoid remote calls; prefer process_inputs where possible
-        return torch.zeros(len(prompts), self.hidden_size, device=self.device)
+        return torch.zeros(len(prompts), self.text_hidden_size, device=self.device)
 
     def _process_clip_inputs(self, B, images, prompts):
         encoding = self.processor(images=images, text=prompts, return_tensors="pt").to(self.device)
