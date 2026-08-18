@@ -26,6 +26,14 @@ try:
 except Exception:
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
+try:
+    # Newer Mamba fast paths call the private causal-conv1d C++ functions
+    # directly.  Some otherwise compatible causal-conv1d wheels only expose
+    # the public CUDA-backed function, so use Mamba's unfused CUDA path there.
+    from mamba_ssm.ops.selective_scan_interface import causal_conv1d_fwd_function  # type: ignore
+except Exception:
+    causal_conv1d_fwd_function = None
+
 
 class FusionNet(nn.Module):
     """FusionNet implementation matching original coupled-mamba interface"""
@@ -155,7 +163,10 @@ def create_block_enhanced(
         and torch.cuda.is_available()
     )
     if use_mamba_kernel:
-        mixer_cls = Mamba
+        mixer_cls = partial(
+            Mamba,
+            use_fast_path=causal_conv1d_fwd_function is not None,
+        )
         norm_cls = partial(
             nn.LayerNorm if not rms_norm else RMSNorm, eps=norm_epsilon, **factory_kwargs
         )
